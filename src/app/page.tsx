@@ -530,8 +530,10 @@ const frames = activeProject?.frames.length
   // ---------- Helpers (Centralized Pauses) ----------
 
   // pushUndo takes a single Project snapshot; activeFrame is captured at call time.
-  const pushUndo = useCallback(
+    const pushUndo = useCallback(
     (project: Project) => {
+      console.log("pushUndo, stack size before:", undoStack.current.length);
+
       undoStack.current.push({
         projectId: project.id,
         project,
@@ -546,7 +548,6 @@ const frames = activeProject?.frames.length
     },
     [activeFrame]
   );
-
   // Any project mutation forces playback to pause
   const updateProject = useCallback(
     (fn: (p: Project) => Project) => {
@@ -570,6 +571,7 @@ const frames = activeProject?.frames.length
   );
 
   const undo = useCallback(() => {
+    console.log("undo called, stack size:", undoStack.current.length);
     const snapshot = undoStack.current.pop();
     if (!snapshot) return;
 
@@ -618,7 +620,9 @@ const frames = activeProject?.frames.length
     setIsPlaying(false);
   }, [activeFrame]);
 
-  const redo = useCallback(() => {
+  
+
+    const redo = useCallback(() => {
     const snapshot = redoStack.current.pop();
     if (!snapshot) return;
 
@@ -657,6 +661,35 @@ const frames = activeProject?.frames.length
     setEditingIndex(snapshot.activeFrame);
     setIsPlaying(false);
   }, [activeFrame]);
+
+    useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+
+      const key = e.key.toLowerCase();
+
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        if (!selectionActive) undo();
+      } else if (key === "y" || (key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        if (!selectionActive) redo();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, selectionActive]);
 
   // Any manual frame selection forces playback to pause
   const selectFrame = useCallback(

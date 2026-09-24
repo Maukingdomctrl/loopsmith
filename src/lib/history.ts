@@ -51,25 +51,16 @@ export function loadHistory(): StoredHistory {
 }
 
 export function saveHistory(
-  undo: readonly Snapshot[],
-  redo: readonly Snapshot[]
+  _undo: readonly Snapshot[],
+  _redo: readonly Snapshot[]
 ): void {
+  // Undo history is session-only: snapshots hold layer bitmaps and
+  // transparency masks that do not fit in localStorage.
   if (typeof localStorage === "undefined") return;
   try {
-    // Trim before serializing: a 50-deep stack of 24-frame projects with
-    // inlined data URLs will exceed the localStorage quota and throw, silently
-    // losing ALL history rather than the oldest entry.
-    const payload: StoredHistory = {
-      undo: undo.slice(-LIMIT).map(stripImages),
-      redo: redo.slice(-LIMIT).map(stripImages),
-    };
-    localStorage.setItem(KEY, JSON.stringify(payload));
+    localStorage.removeItem(KEY);
   } catch {
-    try {
-      localStorage.removeItem(KEY);
-    } catch {
-      /* quota exhausted and unrecoverable; in-memory history still works */
-    }
+    /* ignore */
   }
 }
 
