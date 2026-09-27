@@ -1,6 +1,3 @@
-
-// === slice.ts ===
-
 /**
  * Loop Sprite Engine — exact sheet slicing.
  *
@@ -36,8 +33,16 @@
 import {
   DEFAULT_SPRITE_CONFIG,
   type CellRect,
+  type OccupancyKind,
+  type SpriteEngineConfig,
   type SpriteGrid,
 } from "./types";
+import { buildOccupancy } from "./occupancy";
+import {
+  buildOwnershipReport,
+  groupUnits,
+  labelComponents,
+} from "./ownership";
 
 // ---------------------------------------------------------------------------
 // Public surface
@@ -472,4 +477,299 @@ export async function sliceSheet(
   }
 
   return { ...result, slices };
+}
+// ---------------------------------------------------------------------------
+// Clean extraction: each frame keeps only the sprite its cell owns
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of `extractCleanCells`.
+ *
+ * `cleaned` is false when the sheet has no separable background (a photo, or a
+ * checkerboard painted into the pixels). Frames are then plain rectangle copies,
+ * exactly what the old cutter produced, so the caller never gets worse output.
+ */
+export interface CleanCellsResult {
+  /** One frame per cell, row-major, each exactly the cell's size. */
+  readonly frames: ImageData[];
+  readonly kind: OccupancyKind;
+  readonly cleaned: boolean;
+  /** Pixels recognised as drawn grid/box lines and removed. */
+  readonly linePixels: number;
+  /** Ink pixels removed because another cell owns them. */
+  readonly foreignPixels: number;
+}
+
+/** Plain, bit-exact rectangle copy (the old behaviour). */
+function copyCell(image: ImageData, cell: CellRect): ImageData {
+  const dest = new ImageData(cell.width, cell.height);
+  const rowBytes = cell.width * 4;
+  for (let y = 0; y < cell.height; y++) {
+    const src = ((cell.y + y) * image.width + cell.x) * 4;
+    dest.data.set(image.data.subarray(src, src + rowBytes), y * rowBytes);
+  }
+  return dest;
+}
+
+function medianInt(values: number[]): number {
+  if (values.length === 0) return 0;
+  const s = values.slice().sort((a, b) => a - b);
+  return s[(s.length - 1) >> 1];
+}
+
+/**
+ * Mark pixels that belong to straight, thin, long lines: the grid lines and
+ * boxes AI image tools draw around frames.
+ *
+ * A horizontal run of ink qualifies when it is at least `minLenX` long and at
+ * least 85% of its pixels are thin vertically (≤ `thick` px). Only the thin
+ * pixels are marked, so where a line passes through a sprite the sprite stays.
+ * Vertical runs are treated symmetrically.
+ */
+function markLines(
+  occ: Uint8Array,
+  w: number,
+  h: number,
+  ink: number,
+  minLenX: number,
+  minLenY: number,
+  thick: number,
+  out: Uint8Array
+): number {
+  const n = w * h;
+  const hRun = new Uint16Array(n);
+  const vRun = new Uint16Array(n);
+
+  for (let y = 0; y < h; y++) {
+    const base = y * w;
+    let x = 0;
+    while (x < w) {
+      if (occ[base + x] < ink) { x++; continue; }
+      let e = x;
+      while (e < w && occ[base + e] >= ink) e++;
+      const len = Math.min(65535, e - x);
+      for (let i = x; i < e; i++) hRun[base + i] = len;
+      x = e;
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let y = 0;
+    while (y < h) {
+      if (occ[y * w + x] < ink) { y++; continue; }
+      let e = y;
+      while (e < h && occ[e * w + x] >= ink) e++;
+      const len = Math.min(65535, e - y);
+      for (let i = y; i < e; i++) vRun[i * w + x] = len;
+      y = e;
+    }
+  }
+
+  let marked = 0;
+
+  // Horizontal lines.
+  for (let y = 0; y < h; y++) {
+    const base = y * w;
+    let x = 0;
+    while (x < w) {
+      const len = hRun[base + x];
+      if (len === 0) { x++; continue; }
+      if (len >= minLenX) {
+        let thin = 0;
+        for (let i = x; i < x + len; i++) if (vRun[base + i] <= thick) thin++;
+        if (thin * 100 >= len * 85) {
+          for (let i = x; i < x + len; i++) {
+            const p = base + i;
+            if (vRun[p] <= thick && !out[p]) { out[p] = 1; marked++; }
+          }
+        }
+      }
+      x += len;
+    }
+  }
+
+  // Vertical lines.
+  for (let x = 0; x < w; x++) {
+    let y = 0;
+    while (y < h) {
+      const len = vRun[y * w + x];
+      if (len === 0) { y++; continue; }
+      if (len >= minLenY) {
+        let thin = 0;
+        for (let i = y; i < y + len; i++) if (hRun[i * w + x] <= thick) thin++;
+        if (thin * 100 >= len * 85) {
+          for (let i = y; i < y + len; i++) {
+            const p = i * w + x;
+            if (hRun[p] <= thick && !out[p]) { out[p] = 1; marked++; }
+          }
+        }
+      }
+      y += len;
+    }
+  }
+
+  return marked;
+}
+
+/**
+ * Cut every cell of `grid` out of `image`, keeping ONLY the sprite that cell
+ * owns. Frame sizes are exactly the cell sizes, as before.
+ *
+ * Pipeline (all existing engine stages, now used at cut time):
+ *   1. occupancy        → what is ink and what is background
+ *   2. line removal     → drawn grid lines / boxes stop counting as ink
+ *   3. components+units → which pixels form one sprite (crowns, sparkles attach)
+ *   4. ownership        → which cell each sprite belongs to
+ *   5. per cell: keep owned ink and anything it encloses (eyes, mouths);
+ *      everything reachable from the cell border without crossing owned ink
+ *      becomes transparent — neighbour pieces, lines, background, halos.
+ *
+ * On an opaque sheet (background colour, e.g. white) edge pixels are also
+ * un-blended from the background colour, so a sprite cut from white does not
+ * keep a white fringe when placed on a dark background.
+ */
+export function extractCleanCells(
+  image: ImageData,
+  grid: SpriteGrid,
+  config: SpriteEngineConfig = DEFAULT_SPRITE_CONFIG
+): CleanCellsResult {
+  assertGridFits(grid, image.width, image.height);
+  const cells = enumerateCells(grid);
+  const field = buildOccupancy(image, config);
+
+  if (field.kind !== "alpha" && field.kind !== "background") {
+    return {
+      frames: cells.map((c) => copyCell(image, c)),
+      kind: field.kind,
+      cleaned: false,
+      linePixels: 0,
+      foreignPixels: 0,
+    };
+  }
+
+  const W = image.width;
+  const H = image.height;
+  const src = image.data;
+  const ink = Math.max(1, config.minInkLevel);
+
+  // 1–2. Occupancy with drawn lines removed. Works on a copy.
+  const occ = new Uint8Array(field.data);
+  const isLine = new Uint8Array(W * H);
+  const widths: number[] = [];
+  const heights: number[] = [];
+  for (let i = 0; i < grid.cols; i++) widths.push(grid.cutsX[i + 1] - grid.cutsX[i]);
+  for (let i = 0; i < grid.rows; i++) heights.push(grid.cutsY[i + 1] - grid.cutsY[i]);
+  const cellW = Math.max(8, medianInt(widths));
+  const cellH = Math.max(8, medianInt(heights));
+  const thick = Math.max(3, Math.round(Math.min(W, H) * 0.003));
+  const linePixels = markLines(
+    occ, W, H, ink,
+    Math.max(24, Math.round(cellW * 0.85)),
+    Math.max(24, Math.round(cellH * 0.85)),
+    thick,
+    isLine
+  );
+  if (linePixels > 0) {
+    for (let p = 0; p < isLine.length; p++) if (isLine[p]) occ[p] = 0;
+  }
+  const cleanField = { ...field, data: occ };
+
+  // 3–4. Sprite units and who owns them, for THIS grid.
+  const labelling = labelComponents(cleanField, config);
+  const grouping = groupUnits(labelling, config);
+  const report = buildOwnershipReport(cleanField, grid, labelling, grouping, config);
+  const ownerOfUnit = new Int32Array(report.units.length);
+  for (let u = 0; u < report.units.length; u++) ownerOfUnit[u] = report.units[u].ownerCell;
+  const labels = labelling.labels;
+  const unitOf = grouping.unitOfComponent;
+
+  const opaque = field.kind === "background";
+  const bgR = opaque && field.background !== null ? (field.background >> 16) & 255 : 0;
+  const bgG = opaque && field.background !== null ? (field.background >> 8) & 255 : 0;
+  const bgB = opaque && field.background !== null ? field.background & 255 : 0;
+
+  let foreignPixels = 0;
+  const frames: ImageData[] = [];
+
+  for (let ci = 0; ci < cells.length; ci++) {
+    const cell = cells[ci];
+    const cw = cell.width;
+    const ch = cell.height;
+    const count = cw * ch;
+    const dest = copyCell(image, cell);
+    const d = dest.data;
+    
+     // Edge band: small pieces touching it are neighbour leftovers, not this sprite.
+    const margin = Math.max(6, Math.round(Math.min(cw, ch) * 0.06));
+    let mainMass = 0;
+    for (const u of report.units) if (u.ownerCell === cell.index && u.mass > mainMass) mainMass = u.mass;
+    const dropUnit = new Uint8Array(report.units.length);
+    for (let u = 0; u < report.units.length; u++) {
+      const un = report.units[u];
+      if (un.ownerCell !== cell.index || un.mass >= mainMass * 0.15) continue;
+            dropUnit[u] = 1;
+    }
+
+    // Owned ink in this cell.
+    const owned = new Uint8Array(count);
+    for (let y = 0; y < ch; y++) {
+      const gy = cell.y + y;
+      for (let x = 0; x < cw; x++) {
+        const gp = gy * W + cell.x + x;
+        const l = labels[gp];
+        if (l < 0) continue;
+        const u = unitOf[l];
+         if (u >= 0 && ownerOfUnit[u] === cell.index && !dropUnit[u]) owned[y * cw + x] = 1;
+        else foreignPixels++;
+      }
+    }
+
+    // Flood from the cell border through everything that is not owned ink.
+    const outside = new Uint8Array(count);
+    const stack = new Int32Array(count);
+    let top = 0;
+    const seed = (p: number) => {
+      if (!owned[p] && !outside[p]) { outside[p] = 1; stack[top++] = p; }
+    };
+    for (let x = 0; x < cw; x++) { seed(x); seed((ch - 1) * cw + x); }
+    for (let y = 0; y < ch; y++) { seed(y * cw); seed(y * cw + cw - 1); }
+    while (top > 0) {
+      const p = stack[--top];
+      const y = (p / cw) | 0;
+      const x = p - y * cw;
+      if (x > 0) seed(p - 1);
+      if (x < cw - 1) seed(p + 1);
+      if (y > 0) seed(p - cw);
+      if (y < ch - 1) seed(p + cw);
+    }
+
+    // Write alpha (and un-blend opaque-sheet edges).
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const p = y * cw + x;
+        const i = p * 4;
+        if (outside[p]) { d[i + 3] = 0; continue; }
+        if (!opaque || !owned[p]) continue; // interior or alpha sheet: keep as is
+
+        const onEdge =
+          (x > 0 && outside[p - 1]) ||
+          (x < cw - 1 && outside[p + 1]) ||
+          (y > 0 && outside[p - cw]) ||
+          (y < ch - 1 && outside[p + cw]);
+        if (!onEdge) continue;
+
+        const a = occ[(cell.y + y) * W + cell.x + x] / 255;
+        if (a >= 0.999) continue;
+        if (a < 0.1) { d[i + 3] = 0; continue; }
+        const k = 1 - a;
+        d[i] = Math.max(0, Math.min(255, Math.round((src[((cell.y + y) * W + cell.x + x) * 4] - k * bgR) / a)));
+        d[i + 1] = Math.max(0, Math.min(255, Math.round((src[((cell.y + y) * W + cell.x + x) * 4 + 1] - k * bgG) / a)));
+        d[i + 2] = Math.max(0, Math.min(255, Math.round((src[((cell.y + y) * W + cell.x + x) * 4 + 2] - k * bgB) / a)));
+        d[i + 3] = Math.round(d[i + 3] * a);
+      }
+    }
+
+    frames.push(dest);
+  }
+
+  return { frames, kind: field.kind, cleaned: true, linePixels, foreignPixels };
 }

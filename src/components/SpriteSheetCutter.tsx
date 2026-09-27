@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { gridFromCuts, type SpriteGrid } from "@/lib/sprite";
+import { extractCleanCells } from "@/lib/sprite/slice";
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * MATHEMATICS
@@ -430,6 +431,9 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
   const [showProfiles, setShowProfiles] = useState(true);
   const [busy, setBusy] = useState<null | { done: number; total: number }>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Keep only each cell's own sprite; neighbour pieces and drawn lines become transparent. */
+  const [cleanEdges, setCleanEdges] = useState(true);
+  const [cleanNote, setCleanNote] = useState<string | null>(null);
 
   const [state, dispatch] = useReducer(cutsReducer, { present: { x: [], y: [] }, past: [], future: [] });
   const cutsX = state.present.x;
@@ -951,16 +955,42 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
 
     const frames: string[] = [];
     try {
+      // Clean pass: one analysis of the whole sheet, then per-cell ownership.
+      // Falls back to plain rectangles when the background can't be separated.
+      let cleaned: ImageData[] | null = null;
+      setCleanNote(null);
+      if (cleanEdges) {
+        await new Promise((r2) => setTimeout(r2, 0)); // let "Encoding 0/n" paint first
+        try {
+          const result = extractCleanCells(img, grid);
+          if (result.cleaned) cleaned = result.frames;
+          else setCleanNote("Background couldn't be separated (photo or painted checkerboard) — frames were cut as plain rectangles.");
+        } catch (err) {
+          console.error("Clean cut failed, using plain rectangles", err);
+          setCleanNote("Edge cleaning failed on this sheet — frames were cut as plain rectangles.");
+        }
+      }
+
+      let k = 0;
       for (let r = 0; r < boundsY.length - 1; r++) {
-        for (let c = 0; c < boundsX.length - 1; c++) {
+        for (let c = 0; c < boundsX.length - 1; c++, k++) {
           const x = boundsX[c], y = boundsY[r];
           const cw = boundsX[c + 1] - x, chh = boundsY[r + 1] - y;
 
           scratch.width = cw; scratch.height = chh;
           sctx.clearRect(0, 0, cw, chh);
-          // Integer source rect from the natural-size backing store: source
-          // pixels are copied, never resampled.
-          sctx.drawImage(sheet, x, y, cw, chh, 0, 0, cw, chh);
+                    if (cleaned) {
+            // Skip cells with (almost) no sprite in them: stray thin rows/cols.
+            let ink = 0;
+            const px = cleaned[k].data;
+            for (let i = 3; i < px.length; i += 4) if (px[i] > 20) ink++;
+            if (ink < 50) { setBusy({ done: frames.length, total }); continue; }
+            sctx.putImageData(cleaned[k], 0, 0);
+          } else {
+            // Integer source rect from the natural-size backing store: source
+            // pixels are copied, never resampled.
+            sctx.drawImage(sheet, x, y, cw, chh, 0, 0, cw, chh);
+          }
 
           const blob = await new Promise<Blob | null>((res) => scratch.toBlob(res, "image/png"));
           if (!blob) throw new Error(`Frame ${frames.length} failed to encode.`);
@@ -1069,7 +1099,15 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
           <button onClick={() => setZoom((z) => Math.min(16, +(z * 1.5).toFixed(4)))} className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700">＋</button>
           <button onClick={() => setZoom(1)} className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700">Fit</button>
 
-          <label className="ml-auto flex cursor-pointer items-center gap-2 text-zinc-400">
+          <label
+            className="ml-auto flex cursor-pointer items-center gap-2 text-zinc-400"
+            title="Each frame keeps only its own sprite. Pieces of neighbours and lines drawn by the AI become transparent."
+          >
+            <input type="checkbox" checked={cleanEdges} onChange={(e) => setCleanEdges(e.target.checked)} className="accent-violet-500" />
+            Clean edges
+          </label>
+
+          <label className="flex cursor-pointer items-center gap-2 text-zinc-400">
             <input type="checkbox" checked={showProfiles} onChange={(e) => setShowProfiles(e.target.checked)} className="accent-violet-500" />
             Profiles
           </label>
@@ -1117,8 +1155,12 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
           <p className="text-xs text-zinc-500">
             {busy
               ? `Encoding ${busy.done} / ${busy.total}…`
+              : cleanNote
+              ? cleanNote
               : frameCount > MAX_FRAMES
               ? `Too many frames (max ${MAX_FRAMES}).`
+              : cleanEdges
+              ? "Clean edges on: each frame keeps only its own sprite."
               : "Interior lines only — the outer edges are fixed."}
           </p>
           <div className="flex gap-2">

@@ -43,17 +43,11 @@ function RightSidebar({
 
 
   return (
-    <aside className="w-72 border-l border-white/10 bg-[#141821] p-5">
+    <aside className="w-72 shrink-0 overflow-y-auto border-l border-white/10 bg-[#141821] p-5">
       <h2 className="mb-5 font-semibold">Properties</h2>
 
       <div className="space-y-5">
-        {/* Current Frame */}
-        <div>
-          <p className="text-sm text-zinc-400">Current Frame</p>
-          <div className="mt-1 rounded-lg bg-zinc-800 p-3">
-            Frame {activeFrame + 1}
-          </div>
-        </div>
+        
 
         {/* FPS */}
         <div>
@@ -173,15 +167,12 @@ function RightSidebar({
           )}
         </div>
 
-            {/* Loop */}
-    <div>
-      <p className="text-sm text-zinc-400">Loop Mode</p>
-      <div className="mt-1 rounded-lg bg-zinc-800 p-3">
-        Seamless
-      </div>
-    </div>
+            
   </div>
-
+        <details className="group mt-4 border-t border-white/10 pt-3">
+      <summary className="cursor-pointer select-none list-none text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
+        ▸ ERASER &amp; TRANSPARENCY
+      </summary>
     <TransparencyPanel
     enabled={transparency.enabled}
     tool={transparency.tool}
@@ -194,7 +185,7 @@ function RightSidebar({
       onTransparencyChange({ tolerance })
     }
   />
-
+    </details>
   {children}
 </aside>
   );

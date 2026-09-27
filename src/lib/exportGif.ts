@@ -94,7 +94,24 @@ async function renderGIF(
   drawFrameLayers(ctx, frame, size, {
     background,
     checkerboard: false,
+    smoothing: true,
   });
+
+    // GIF transparency is all-or-nothing: decide each pixel cleanly.
+  if (background.transparent) {
+    const img = ctx.getImageData(0, 0, size, size);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 128) {
+        d[i] = 0; d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = 255; // → transparent key
+      } else {
+        d[i + 3] = 255;
+        // keep real black art visible (not mistaken for the transparent key)
+        if (d[i] === 0 && d[i + 1] === 0 && d[i + 2] === 0) d[i + 2] = 1;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
 
   gif.addFrame(canvas, {
     copy: true,

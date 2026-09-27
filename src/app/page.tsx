@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-
+import { FolderOpen } from "lucide-react";
 import Toolbar from "@/components/Toolbar";
 import Canvas, { type CanvasView } from "@/components/Canvas";
 import Timeline from "@/components/Timeline";
-import LeftSidebar from "@/components/LeftSidebar";
 import RightSidebar from "@/components/RightSidebar";
 import ProjectSidebar from "@/components/ProjectSidebar";
-import EmojiLibrary from "@/components/EmojiLibrary";
+
 import LayerPanel from "@/components/LayerPanel";
 import TransformPanel from "@/components/TransformPanel";
 import TransparencyToggle from "@/components/TransparencyToggle";
@@ -117,8 +116,9 @@ export default function Home() {
   const [selectionActive, setSelectionActive] = useState(false);
   const [previewFrame, setPreviewFrame] = useState(0);
   const [onionSkin, setOnionSkin] = useState(true);
+  const [showProjects, setShowProjects] = useState(false);
 
-  const [showEmojiLibrary, setShowEmojiLibrary] = useState(false);
+ 
   const [showLayerPanel, setShowLayerPanel] = useState(true);
 
   const [sliceFile, setSliceFile] = useState<File | null>(null);
@@ -1037,7 +1037,7 @@ const deleteProject = useCallback(
   [activeProjectId, stabilizer]
 );  
   return (
-    <main className="h-screen overflow-hidden bg-[#0F1117] text-white">
+    <main className="flex h-screen flex-col overflow-hidden bg-[#0F1117] text-white">
       <Toolbar
         isPlaying={isPlaying}
         saveStatus={saveStatus}
@@ -1049,61 +1049,6 @@ const deleteProject = useCallback(
         }
         onSlice={() => openPicker({ kind: "slice" })}
         onExport={() => setShowExport(true)}
-        onClear={clearActiveLayerPixels}
-        onDuplicate={() => {
-          const target = editingIndex + 1;
-
-          updateProject((project) => {
-            const next = [...project.frames];
-
-            next.splice(target, 0, duplicateFrame(next[editingIndex]));
-
-            return {
-              ...project,
-              frames: next,
-            };
-          });
-
-          selectFrame(target);
-        }}
-        onDeleteFrame={() => {
-          if (frames.length === 1) {
-            updateProject((project) => ({
-              ...project,
-              frames: [createBlankFrame()],
-              thumbnail: null,
-            }));
-
-            selectFrame(0);
-            return;
-          }
-
-          const frameToDelete = frames[editingIndex];
-
-          if (frameToDelete?.image && activeProject) {
-            deletedFrameImages.current.set(
-              frameToDelete.id,
-              frameToDelete.image
-            );
-
-            deleteFrameImage(activeProject.id, frameToDelete.id).catch(
-              console.error
-            );
-          }
-
-          updateProject((project) => {
-            const result = deleteFrame(project.frames, editingIndex);
-
-            return {
-              ...project,
-              frames: result.frames,
-              thumbnail: result.frames.find((f) => f.image)?.image ?? null,
-            };
-          });
-
-          const result = deleteFrame(frames, editingIndex);
-          selectFrame(result.nextIndex);
-        }}
         onAutoStabilize={handleAutoStabilize}
         onClearStabilization={handleClearStabilization}
         stabilizeStatus={stabilizer.status}
@@ -1112,83 +1057,43 @@ const deleteProject = useCallback(
         stabilizationStale={stabilizationStale}
       />
 
-      <section className="flex h-[calc(100vh-64px-112px)]">
-        <ProjectSidebar
-          projects={memoProjects}
-          activeProject={activeProjectId}
-          onSelect={(id) => {
-            if (id === activeProjectId) return;
+      <section className="flex min-h-0 flex-1">
+        <div className="flex shrink-0 border-r border-white/10 bg-[#11151D]">
+          <button
+            onClick={() => setShowProjects((v) => !v)}
+            title={showProjects ? "Hide projects" : "Show projects"}
+            aria-label="Toggle projects"
+            className={`flex w-12 flex-col items-center gap-1 pt-4 text-xs ${
+              showProjects ? "text-white" : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <FolderOpen size={20} />
+          </button>
 
-            stabilizer.cancel();
-            stabilizer.reset();
+          {showProjects && (
+            <ProjectSidebar
+              projects={memoProjects}
+              activeProject={activeProjectId}
+              onSelect={(id) => {
+                if (id === activeProjectId) return;
 
-            setActiveProjectId(id);
-            setActiveFrame(0);
-            setEditingIndex(0);
-            setIsPlaying(false);
-          }}
-          onCreate={createProject}
-          onRename={renameProject}
-          onDelete={deleteProject}
-          showEmojiLibrary={showEmojiLibrary}
-          onToggleEmojiLibrary={() => setShowEmojiLibrary(!showEmojiLibrary)}
-        />
+                stabilizer.cancel();
+                stabilizer.reset();
 
-        {showEmojiLibrary && (
-          <EmojiLibrary
-            onApplyGeometry={(preset) => {
-              const geo = geometryPresets[preset];
+                setActiveProjectId(id);
+                setActiveFrame(0);
+                setEditingIndex(0);
+                setIsPlaying(false);
+              }}
+              onCreate={createProject}
+              onRename={renameProject}
+              onDelete={deleteProject}
+            />
+          )}
+        </div>
+        
 
-              // Presets are expressed in the legacy pose vocabulary, so they
-              // are applied through the transform actions rather than by
-              // writing x/y/zoom directly — that keeps the base layer's pose
-              // and the legacy fields in agreement.
-              const frame = frames[activeFrame];
-              const base = frame?.layers.find((l) => l.kind === "base");
-              if (!base) return;
-
-              handleHistoryCommit();
-
-              editor.dispatch({
-                type: "xf/position",
-                id: base.id,
-                position: {
-                  x: CANVAS_SIZE / 2,
-                  y: CANVAS_SIZE / 2 + geo.centerY,
-                },
-              });
-
-              editor.dispatch({ type: "xf/rotateTo", id: base.id, deg: 0 });
-
-              editor.dispatch({
-                type: "xf/zoomTo",
-                id: base.id,
-                zoom: geo.scale,
-                baseScale:
-                  base.size.w > 0
-                    ? Math.min(
-                        CANVAS_SIZE / base.size.w,
-                        CANVAS_SIZE / Math.max(1, base.size.h)
-                      )
-                    : 1,
-              });
-            }}
-            onCreateProject={(templateId) => {
-              const template = templateRegistry.find(
-                (t) => t.id === templateId
-              );
-              if (!template) return;
-
-              const project = createTemplateProject(template);
-
-              setProjects((prev) => [...prev, project]);
-              setActiveProjectId(project.id);
-              selectFrame(0);
-            }}
-          />
-        )}
-
-        <LeftSidebar />
+  
 
         <Canvas
           projectId={activeProject?.id ?? ""}
@@ -1269,6 +1174,11 @@ const deleteProject = useCallback(
           transparency={transparency}
           onTransparencyChange={patch}
         >
+                    <details className="border-t border-white/10">
+            <summary className="cursor-pointer select-none list-none p-3 text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
+              ▸ TRANSFORM
+            </summary>
+
           <TransformPanel
             layer={editor.primary}
             disabled={isPlaying || selectionActive}
@@ -1276,7 +1186,7 @@ const deleteProject = useCallback(
             onStraightenTool={() => editor.setTool("straighten")}
             onCropTool={() => editor.beginCrop()}
           />
-
+                    </details>
           <TransparencyToggle
             background={background}
             onChange={handleBackgroundChange}
@@ -1320,6 +1230,62 @@ const deleteProject = useCallback(
           selectFrame(frame);
           openPicker({ kind: "replace-active", frame });
         }}
+                onClear={clearActiveLayerPixels}
+        onDuplicate={() => {
+          const target = editingIndex + 1;
+
+          updateProject((project) => {
+            const next = [...project.frames];
+
+            next.splice(target, 0, duplicateFrame(next[editingIndex]));
+
+            return {
+              ...project,
+              frames: next,
+            };
+          });
+
+          selectFrame(target);
+        }}
+        onDeleteFrame={() => {
+          if (frames.length === 1) {
+            updateProject((project) => ({
+              ...project,
+              frames: [createBlankFrame()],
+              thumbnail: null,
+            }));
+
+            selectFrame(0);
+            return;
+          }
+
+          const frameToDelete = frames[editingIndex];
+
+          if (frameToDelete?.image && activeProject) {
+            deletedFrameImages.current.set(
+              frameToDelete.id,
+              frameToDelete.image
+            );
+
+            deleteFrameImage(activeProject.id, frameToDelete.id).catch(
+              console.error
+            );
+          }
+
+          updateProject((project) => {
+            const result = deleteFrame(project.frames, editingIndex);
+
+            return {
+              ...project,
+              frames: result.frames,
+              thumbnail: result.frames.find((f) => f.image)?.image ?? null,
+            };
+          });
+
+          const result = deleteFrame(frames, editingIndex);
+          selectFrame(result.nextIndex);
+        }}
+
       />
 
       <input

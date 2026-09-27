@@ -57,11 +57,12 @@ export function drawFrameLayers(
   ctx: CanvasRenderingContext2D,
   frame: Frame,
   surface: number = CANVAS_SIZE,
-  opts: {
+    opts: {
     background?: CanvasBackground;
     resolve?: BitmapResolver;
     globalAlpha?: number;
     checkerboard?: boolean;
+    smoothing?: boolean;
   } = {}
 ): void {
   compositeLayers(ctx, frame.layers, opts.resolve ?? domResolver(), {
@@ -71,6 +72,6 @@ export function drawFrameLayers(
     drawCheckerboard: opts.checkerboard ?? false,
     globalAlpha: opts.globalAlpha ?? 1,
     onlyLayerIds: null,
-    smoothing: false,
+    smoothing: opts.smoothing ?? false,
   });
 }

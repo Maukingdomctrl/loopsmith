@@ -1,15 +1,14 @@
 "use client";
-
+import { useState } from "react";
 import {
   Upload,
-  Trash2,
-  Copy,
   Download,
   Play,
   Pause,
   Undo2,
   Redo2,
   Wand2,
+  X,
 } from "lucide-react";
 
 interface ToolbarProps {
@@ -22,10 +21,6 @@ interface ToolbarProps {
   onImport: () => void;
   onSlice: () => void;
   onExport: () => void;
-  onClear: () => void;
-  onDuplicate: () => void;
-  onDeleteFrame: () => void;
-
   onAutoStabilize: () => void;
   onClearStabilization: () => void;
 
@@ -39,6 +34,9 @@ interface ToolbarProps {
   stabilizationStale?: boolean;
 }
 
+const quiet =
+  "flex h-10 items-center gap-2 rounded-lg px-3 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white disabled:opacity-40";
+
 export default function Toolbar({
   isPlaying,
   saveStatus,
@@ -48,9 +46,6 @@ export default function Toolbar({
   onImport,
   onSlice,
   onExport,
-  onClear,
-  onDuplicate,
-  onDeleteFrame,
   onAutoStabilize,
   onClearStabilization,
   stabilizeStatus,
@@ -60,121 +55,117 @@ export default function Toolbar({
 }: ToolbarProps) {
   const isStabilizing =
     stabilizeStatus === "decoding" || stabilizeStatus === "running";
+  const [importOpen, setImportOpen] = useState(false);
+
+  const stabilizeLabel = isStabilizing
+    ? stabilizeProgress
+      ? `Stabilizing ${Math.round(stabilizeProgress.fraction * 100)}%`
+      : "Stabilizing…"
+    : stabilizationStale
+      ? "Outdated · Re-run"
+      : hasStabilization
+        ? "Stabilized"
+        : "Auto stabilize";
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-white/10 px-6">
-      <div className="flex items-center gap-4">
-        <h1 className="text-xl font-bold">Loop Emoji Studio</h1>
+    <header className="shrink-0 flex h-16 items-center justify-between gap-4 border-b border-white/10 bg-[#11151D] px-5">
+      {/* Left: name + save state + file actions */}
+      <div className="flex items-center gap-3">
+        <h1 className="text-lg font-bold">Loop Emoji Studio</h1>
+        <span className="text-xs text-zinc-500">
+          {saveStatus === "saving" ? "Saving…" : "Saved"}
+        </span>
 
-        <div className="rounded-full bg-zinc-800 px-3 py-1 text-xs">
-          {saveStatus === "saving" ? "Saving..." : "Saved"}
-        </div>
-      </div>
+        <span className="mx-2 h-6 w-px bg-white/10" />
 
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onUndo}
-          className="rounded-lg bg-zinc-800 p-2 hover:bg-zinc-700"
-          title="Undo (Ctrl+Z)"
-        >
+        <button onClick={onUndo} className={quiet} title="Undo (Ctrl+Z)" aria-label="Undo">
           <Undo2 size={18} />
         </button>
-
-        <button
-          onClick={onRedo}
-          className="rounded-lg bg-zinc-800 p-2 hover:bg-zinc-700"
-          title="Redo (Ctrl+Shift+Z)"
-        >
+        <button onClick={onRedo} className={quiet} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
           <Redo2 size={18} />
         </button>
 
+        <div className="relative" onMouseLeave={() => setImportOpen(false)}>
+          <button onClick={() => setImportOpen((v) => !v)} className={quiet}>
+            <Upload size={18} />
+            Import
+          </button>
+
+          {importOpen && (
+            <div className="absolute left-0 top-full z-50 w-56 pt-1">
+              <div className="overflow-hidden rounded-xl border border-white/10 bg-[#171B24] shadow-2xl">
+                <button
+                  onClick={() => { setImportOpen(false); onImport(); }}
+                  className="block w-full px-4 py-3 text-left hover:bg-white/5"
+                >
+                  <div className="text-sm font-medium">Single image</div>
+                  <div className="text-xs text-zinc-400">Into the current frame</div>
+                </button>
+                <button
+                  onClick={() => { setImportOpen(false); onSlice(); }}
+                  className="block w-full border-t border-white/10 px-4 py-3 text-left hover:bg-white/5"
+                >
+                  <div className="text-sm font-medium">Spritesheet</div>
+                  <div className="text-xs text-zinc-400">Cut into frames</div>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Centre: the main loop — stabilize, then watch */}
+      <div className="flex items-center gap-2">
         <button
-          onClick={onImport}
-          className="flex items-center gap-2 rounded-lg bg-zinc-800 px-4 py-2 hover:bg-zinc-700"
+          onClick={onAutoStabilize}
+          disabled={isPlaying || isStabilizing}
+          title="Estimate the loop's global motion and remove only jitter"
+          className={`flex h-10 min-w-[168px] items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition disabled:opacity-50 ${
+            stabilizationStale
+              ? "bg-amber-500 text-zinc-900 hover:bg-amber-400"
+              : hasStabilization && !isStabilizing
+                ? "bg-emerald-600/20 text-emerald-300 ring-1 ring-emerald-500/40 hover:bg-emerald-600/30"
+                : "bg-amber-500 text-zinc-900 hover:bg-amber-400"
+          }`}
         >
-          <Upload size={18} />
-          Import
-        </button>
-        <button
-          onClick={onSlice}
-          className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 hover:bg-violet-500"
-        >
-          <Upload size={18} />
-          Slice
+          <Wand2 size={16} />
+          {stabilizeLabel}
         </button>
 
-        
-
-        <button
-          onClick={onClear}
-          className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 hover:bg-red-500"
-        >
-          <Trash2 size={18} />
-          Clear
-        </button>
-
-        <button
-          onClick={onDuplicate}
-          className="flex items-center gap-2 rounded-lg bg-zinc-700 px-4 py-2 hover:bg-zinc-600"
-        >
-          <Copy size={18} />
-          Duplicate
-        </button>
-
-        <button
-          onClick={onDeleteFrame}
-          className="flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 hover:bg-orange-500"
-        >
-          <Trash2 size={18} />
-          Delete Frame
-        </button>
+                {hasStabilization && !isStabilizing && (
+          <button
+            onClick={onClearStabilization}
+            disabled={isPlaying}
+            title="Discard automatic stabilization"
+            className={`flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium disabled:opacity-40 ${
+              stabilizationStale
+                ? "bg-amber-600 text-white hover:bg-amber-500"
+                : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+            }`}
+          >
+            <X size={14} />
+            {stabilizationStale ? "Stale — Discard" : "Discard"}
+          </button>
+        )}
 
         <button
           onClick={onPlay}
-          className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 hover:bg-emerald-500"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-zinc-900 hover:bg-zinc-200"
+          title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+          aria-label={isPlaying ? "Pause" : "Play"}
         >
-          {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-          {isPlaying ? "Pause" : "Play"}
-        </button>
-
-        {/* Auto Stabilize */}
-        <div className="ml-2 flex items-center gap-1 border-l border-zinc-700 pl-2">
-          <button
-            onClick={onAutoStabilize}
-            disabled={isPlaying || isStabilizing}
-            title="Estimate the loop's global motion and remove only jitter"
-            className="flex h-10 items-center gap-2 rounded-lg bg-cyan-600 px-3 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-40"
-          >
-            <Wand2 size={16} />
-            {isStabilizing && stabilizeProgress
-              ? `${Math.round(stabilizeProgress.fraction * 100)}%`
-              : "Stabilize"}
-          </button>
-
-          {hasStabilization && (
-            <button
-              onClick={onClearStabilization}
-              disabled={isPlaying}
-              title="Discard automatic stabilization only"
-              className={`h-10 rounded-lg px-3 text-sm ${
-                stabilizationStale
-                  ? "bg-amber-600 text-white hover:bg-amber-500"
-                  : "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
-              }`}
-            >
-              {stabilizationStale ? "Stale — Discard" : "Discard"}
-            </button>
-          )}
-        </div>
-
-        <button
-          onClick={onExport}
-          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 hover:bg-indigo-500"
-        >
-          <Download size={18} />
-          Export
+          {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
         </button>
       </div>
+
+      {/* Right: finish */}
+      <button
+        onClick={onExport}
+        className="flex h-10 items-center gap-2 rounded-lg border border-white/15 px-4 text-sm font-medium hover:bg-white/5"
+      >
+        <Download size={18} />
+        Export
+      </button>
     </header>
   );
 }

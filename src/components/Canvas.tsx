@@ -17,7 +17,7 @@ import {
   Redo2,
   X,
   Crosshair,
-  HelpCircle,
+  
 } from "lucide-react";
 
 import EmojiGuides from "./EmojiGuides";
@@ -1125,54 +1125,7 @@ const handleCanvasPointerUp = (
     };
   }, [handleNativeWheel, canvasContainerRef]);
 
-  /* ---------- Draggable controls panel ---------- */
-
-  const [showControls, setShowControls] = useState(false);
-  const [controlsPos, setControlsPos] = useState({ x: 16, y: 16 });
-  const controlsRef = useRef<HTMLDivElement>(null);
-  const dragControlsStart = useRef({ x: 0, y: 0, panelX: 0, panelY: 0 });
-
-  const handleControlsPointerDown = (e: React.PointerEvent<Element>) => {
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-
-    dragControlsStart.current = {
-      x: e.clientX,
-      y: e.clientY,
-      panelX: controlsPos.x,
-      panelY: controlsPos.y,
-    };
-  };
-
-  const handleControlsPointerMove = (e: React.PointerEvent<Element>) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    e.stopPropagation();
-
-    const dx = e.clientX - dragControlsStart.current.x;
-    const dy = e.clientY - dragControlsStart.current.y;
-
-    const panelW = controlsRef.current?.offsetWidth || 186;
-    const panelH = controlsRef.current?.offsetHeight || 230;
-
-    setControlsPos({
-      x: Math.max(
-        0,
-        Math.min(dragControlsStart.current.panelX + dx, CANVAS_SIZE - panelW)
-      ),
-      y: Math.max(
-        0,
-        Math.min(dragControlsStart.current.panelY + dy, CANVAS_SIZE - panelH)
-      ),
-    });
-  };
-
-  const handleControlsPointerUp = (e: React.PointerEvent<Element>) => {
-    e.stopPropagation();
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-  };
-
+  
   /* ---------- Nudge helper ---------- */
 
   const nudge = (dx: number, dy: number) => {
@@ -1281,141 +1234,13 @@ const handleCanvasPointerUp = (
         : "cursor-grab";
 
   return (
-    <section className="flex flex-1 items-center justify-center">
+    <section className="flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-[#0B0D12]">
       <div
         ref={canvasContainerRef}
         className="relative h-[512px] w-[512px] overflow-hidden rounded-3xl"
         style={{ touchAction: "none" }}
       >
-        {/* ---------- Controls panel ---------- */}
-        {showControls && (
-          <div
-            ref={controlsRef}
-            className="absolute z-[100] w-[186px] select-none overflow-hidden rounded-xl border border-[#3b4252] bg-[#181c24] shadow-2xl"
-            style={{
-              left: controlsPos.x,
-              top: controlsPos.y,
-              touchAction: "none",
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <div
-              className="flex h-7 cursor-grab items-center justify-between bg-[#232938] px-3 active:cursor-grabbing"
-              onPointerDown={handleControlsPointerDown}
-              onPointerMove={handleControlsPointerMove}
-              onPointerUp={handleControlsPointerUp}
-              onPointerCancel={handleControlsPointerUp}
-            >
-              <div className="pointer-events-none flex items-center gap-1.5">
-                <div className="h-1.5 w-1.5 rounded-full bg-[#9ca3af]" />
-                <div className="h-1.5 w-1.5 rounded-full bg-[#9ca3af]" />
-                <div className="h-1.5 w-1.5 rounded-full bg-[#9ca3af]" />
-                <span className="ml-1 text-[10px] font-medium text-[#e5e7eb]">
-                  Controls
-                </span>
-              </div>
-              <button
-                className="pb-0.5 text-[#9ca3af] hover:text-white"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setShowControls(false)}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="flex flex-col p-3 pb-4 text-[9px] leading-relaxed text-[#fff]">
-              <div className="mb-0.5 text-[9.5px] font-medium text-[#9ca3af]">
-                Mouse
-              </div>
-              <div className="flex justify-between">
-                <span>Drag</span> <span className="text-[#9ca3af]">→</span> Move
-              </div>
-              <div className="flex justify-between">
-                <span>Wheel</span> <span className="text-[#9ca3af]">→</span>{" "}
-                Zoom
-              </div>
-              <div className="flex justify-between">
-                <span>Double Click</span>{" "}
-                <span className="text-[#9ca3af]">→</span> Import
-              </div>
-
-              <div className="my-2 h-px bg-[#374151]" />
-
-              <div className="mb-0.5 text-[9.5px] font-medium text-[#9ca3af]">
-                Keyboard
-              </div>
-              <div className="flex justify-between">
-                <span>Space</span> <span className="text-[#9ca3af]">→</span>{" "}
-                Play
-              </div>
-              <div className="flex justify-between">
-                <span>Ctrl+Z</span> <span className="text-[#9ca3af]">→</span>{" "}
-                Undo
-              </div>
-              <div className="flex justify-between">
-                <span>Ctrl+Y</span> <span className="text-[#9ca3af]">→</span>{" "}
-                Redo
-              </div>
-              <div className="flex justify-between">
-                <span>Alt+Arrows</span>{" "}
-                <span className="text-[#9ca3af]">→</span> Nudge
-              </div>
-              <div className="flex justify-between">
-                <span>Enter / Esc</span>{" "}
-                <span className="text-[#9ca3af]">→</span> Select
-              </div>
-
-              <div className="my-2 h-px bg-[#374151]" />
-
-              <div className="mb-0.5 text-[9.5px] font-medium text-[#9ca3af]">
-                Live Values {isPlaying && "(playing)"}
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9ca3af]">Layer</span>{" "}
-                <span className="max-w-[92px] truncate">
-                  {targetLayer?.name ?? "—"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9ca3af]">Zoom</span>{" "}
-                <span>{Math.round(targetZoom * 100)}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9ca3af]">Rotation</span>{" "}
-                <span>
-                  {targetLayer
-                    ? `${Math.round(targetLayer.pose.rotation * 10) / 10}°`
-                    : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9ca3af]">X / Y</span>{" "}
-                <span>
-                  {targetLayer
-                    ? `${Math.round(targetLayer.pose.position.x)} / ${Math.round(
-                        targetLayer.pose.position.y
-                      )}`
-                    : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9ca3af]">Layers</span>{" "}
-                <span>{editFrame.layers.length}</span>
-              </div>
-
-              {editFrame.stab?.dx || editFrame.stab?.dy ? (
-                <div className="flex justify-between">
-                  <span className="text-[#9ca3af]">Stab</span>
-                  <span className="text-cyan-300">
-                    {editFrame.stab.dx.toFixed(2)} /{" "}
-                    {editFrame.stab.dy.toFixed(2)} px
-                  </span>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        )}
-
+        
         {/* ---------- Canvas layer ---------- */}
         <div
           className={`absolute inset-0 ${cursorClass}`}
@@ -1669,15 +1494,8 @@ onPointerCancel={(e) => {
         )}
 
         <div className="absolute right-3 top-3 z-50 flex flex-col gap-2">
-          {!showControls && (
-            <button
-              onClick={() => setShowControls(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-black/70 text-white transition-colors hover:bg-zinc-700"
-              title="Show Controls Panel"
-            >
-              <HelpCircle size={18} />
-            </button>
-          )}
+          
+          
 
           <div className="flex flex-col gap-2 rounded-xl bg-black/50 p-1">
             <button

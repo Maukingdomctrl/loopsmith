@@ -11,8 +11,7 @@ interface ProjectSidebarProps {
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  showEmojiLibrary: boolean;
-  onToggleEmojiLibrary: () => void;
+  
 }
 
 function ProjectSidebar({
@@ -22,8 +21,7 @@ function ProjectSidebar({
   onCreate,
   onRename,
   onDelete,
-  showEmojiLibrary,
-  onToggleEmojiLibrary,
+  
 }: ProjectSidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -47,7 +45,7 @@ function ProjectSidebar({
   };
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-white/10 bg-[#11151D]">
+    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-white/10 bg-[#11151D]">
       <div className="flex flex-col gap-4 border-b border-white/10 p-4">
         <div className="flex items-center gap-2 text-white">
           <FolderOpen size={18} />
@@ -62,17 +60,7 @@ function ProjectSidebar({
           New Animation
         </button>
 
-        <button
-          onClick={onToggleEmojiLibrary}
-          className={`mt-2 flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition ${
-            showEmojiLibrary
-              ? "bg-indigo-600 text-white"
-              : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-          }`}
-        >
-          😀 Emoji Library
-        </button>
-      </div>
+        </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto p-2">
         {projects.map((project) => {
