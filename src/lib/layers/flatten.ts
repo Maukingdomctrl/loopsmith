@@ -73,10 +73,16 @@ function toDataURL(
   if ("toDataURL" in canvas) {
     return canvas.toDataURL(mime, quality);
   }
-  // OffscreenCanvas has no synchronous data-URL path. Flatten is called from
-  // the main thread, where a DOM canvas is always available, so callers get a
-  // DOM surface; this branch only guards the worker case.
-  return null;
+  // OffscreenCanvas has no synchronous data-URL path: copy it onto a DOM
+  // canvas first. Only a worker (no document) has no way out.
+  if (typeof document === "undefined") return null;
+  const dom = document.createElement("canvas");
+  dom.width = canvas.width;
+  dom.height = canvas.height;
+  const ctx = dom.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(canvas, 0, 0);
+  return dom.toDataURL(mime, quality);
 }
 
 /**
@@ -194,6 +200,11 @@ export async function preloadFrameBitmaps(layers: readonly Layer[]): Promise<voi
 export function reflattenIfStale(frame: Frame): Frame {
   const key = layerStateKey(frame.layers);
   if (frame.flattenKey === key && frame.image) return frame;
+  // No pixels anywhere: keep the frame empty so playback and the timeline
+  // still treat it as a blank frame.
+  if (!frame.layers.some((l) => l.image)) {
+    return { ...frame, image: null, flattenKey: key };
+  }
   const out = flattenFrame(frame.layers, { crop: frame.crop });
   if (!out) return frame;
   return { ...frame, image: out.image, flattenKey: out.key, flattenedAt: Date.now() };

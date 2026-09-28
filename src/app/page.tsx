@@ -1197,6 +1197,7 @@ const deleteProject = useCallback(
 
       <Timeline
         frames={timelineFrames}
+        background={background}
         activeFrame={activeFrame}
         onFrameSelect={selectFrame}
         onReorder={(from, to) => {

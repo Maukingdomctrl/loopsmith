@@ -29,40 +29,41 @@ interface Props {
   aspect?: number;
   /** Eraser cursors are drawn differently so the tool is unmistakable. */
   erasing?: boolean;
-  /** Live pressure, 0..1, drawn as an inner ring. */
-  pressure?: number;
+  /** Pencil lead colour — the current paint colour. */
+  color?: string;
   visible?: boolean;
 }
 
-/** Below this the ring is illegible, so a crosshair is drawn instead. */
-const MIN_RING_RADIUS = 3;
-/** Above this a centre dot is added, since the ring's centre is far from it. */
-const CENTER_DOT_RADIUS = 14;
 
 export default function BrushCursor({
   position,
   radius,
-  shape = "round",
   angle = 0,
   aspect = 1,
   erasing = false,
-  pressure,
+  color = "#000000",
   visible = true,
 }: Props) {
   const geometry = useMemo(() => {
     if (!position) return null;
     const rx = Math.max(0.5, radius * Math.max(0.01, aspect));
     const ry = Math.max(0.5, radius);
-    return { rx, ry, tooSmall: Math.max(rx, ry) < MIN_RING_RADIUS };
+    return { rx, ry };
   }, [position, radius, aspect]);
 
   if (!visible || !position || !geometry) return null;
 
-  const { rx, ry, tooSmall } = geometry;
-  const stroke = erasing ? "#F87171" : "#FFFFFF";
-  // Two concentric strokes — dark under light — so the cursor stays visible on
-  // both white and black artwork without any blend-mode trickery.
+  const { rx, ry } = geometry;
   const shadow = "rgba(0,0,0,0.75)";
+
+  // The tool grows with the tip. The pencil lead ends in a rounded tip exactly
+  // as wide as the mark it leaves, and the pencil scales with it (up to 4×) so
+  // it still looks like a pencil in the hand.
+  const r = Math.max(rx, ry);
+  const s = Math.min(4, Math.max(1, r));
+  // Rubber: its rubbing end is as wide as the eraser.
+  const h = Math.max(5, r);
+  const k = Math.min(3, Math.max(1, r / 5));
 
   return (
     <svg
@@ -72,53 +73,28 @@ export default function BrushCursor({
       aria-hidden
     >
       <g transform={`translate(${position.x} ${position.y}) rotate(${angle})`}>
-        {tooSmall || shape === "crosshair" || shape === "precise" ? (
-          <>
-            <g stroke={shadow} strokeWidth={3}>
-              <line x1={-8} y1={0} x2={-2} y2={0} />
-              <line x1={2} y1={0} x2={8} y2={0} />
-              <line x1={0} y1={-8} x2={0} y2={-2} />
-              <line x1={0} y1={2} x2={0} y2={8} />
-            </g>
-            <g stroke={stroke} strokeWidth={1}>
-              <line x1={-8} y1={0} x2={-2} y2={0} />
-              <line x1={2} y1={0} x2={8} y2={0} />
-              <line x1={0} y1={-8} x2={0} y2={-2} />
-              <line x1={0} y1={2} x2={0} y2={8} />
-            </g>
-          </>
-        ) : shape === "square" ? (
-          <>
-            <rect x={-rx} y={-ry} width={rx * 2} height={ry * 2} fill="none" stroke={shadow} strokeWidth={3} />
-            <rect x={-rx} y={-ry} width={rx * 2} height={ry * 2} fill="none" stroke={stroke} strokeWidth={1} />
-          </>
-        ) : (
-          <>
-            <ellipse cx={0} cy={0} rx={rx} ry={ry} fill="none" stroke={shadow} strokeWidth={3} />
-            <ellipse
-              cx={0} cy={0} rx={rx} ry={ry}
-              fill="none" stroke={stroke} strokeWidth={1}
-              strokeDasharray={erasing ? "4 3" : undefined}
-            />
-          </>
-        )}
-
-        {/* Pressure feedback: inner ring at the radius the stamp will actually use. */}
-        {pressure !== undefined && pressure > 0 && pressure < 1 && !tooSmall && (
-          <ellipse
-            cx={0} cy={0}
-            rx={Math.max(0.5, rx * pressure)} ry={Math.max(0.5, ry * pressure)}
-            fill="none" stroke={erasing ? "#F87171" : "#22D3EE"}
-            strokeWidth={1} opacity={0.8}
-          />
-        )}
-
-        {Math.max(rx, ry) > CENTER_DOT_RADIUS && (
-          <>
-            <circle cx={0} cy={0} r={1.6} fill={shadow} />
-            <circle cx={0} cy={0} r={0.8} fill={stroke} />
-          </>
-        )}
+        {/* Held at 45°, with the tip exactly on the pointer. */}
+        <g transform="rotate(-45)" stroke={shadow} strokeWidth={0.75} strokeLinejoin="round">
+          {erasing ? (
+            <>
+              <rect x={0} y={-h} width={12 * k} height={2 * h} rx={2 * k} fill="#F7F3EE" />
+              <rect x={12 * k} y={-h} width={16 * k} height={2 * h} rx={k} fill="#5B8DEF" />
+            </>
+          ) : (
+            <>
+              <g transform={`scale(${s})`} strokeWidth={0.75 / s}>
+                <polygon points="4,-1.3 11,-3.5 11,3.5 4,1.3" fill="#E9C79B" />
+                <rect x={11} y={-3.5} width={20} height={7} fill="#F2B632" />
+                <rect x={31} y={-3.5} width={3.5} height={7} fill="#C9CDD2" />
+                <rect x={34.5} y={-3.5} width={4.5} height={7} rx={1.5} fill="#F29CA3" />
+              </g>
+              <path
+                d={`M ${4 * s} ${-1.3 * s} L 0 ${-r} A ${r} ${r} 0 0 0 0 ${r} L ${4 * s} ${1.3 * s} Z`}
+                fill={color}
+              />
+            </>
+          )}
+        </g>
       </g>
     </svg>
   );

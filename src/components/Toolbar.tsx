@@ -72,7 +72,7 @@ export default function Toolbar({
       {/* Left: name + save state + file actions */}
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-bold">Loop Emoji Studio</h1>
-        <span className="text-xs text-zinc-500">
+        <span className="inline-block w-14 text-xs text-zinc-500">
           {saveStatus === "saving" ? "Saving…" : "Saved"}
         </span>
 

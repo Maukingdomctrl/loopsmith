@@ -1,6 +1,7 @@
 "use client";
 
 import { Plus, Copy, Eraser, Trash2 } from "lucide-react";
+import type { CanvasBackground } from "@/types/layer";
 
 interface TimelineProps {
   frames: (string | null)[];
@@ -12,6 +13,7 @@ interface TimelineProps {
   onDuplicate: () => void;
   onClear: () => void;
   onDeleteFrame: () => void;
+  background?: CanvasBackground;
 }
 
 export default function Timeline({
@@ -24,6 +26,7 @@ export default function Timeline({
   onDuplicate,
   onClear,
   onDeleteFrame,
+  background,
 }: TimelineProps) {
   const actionClass =
     "flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white";
@@ -83,7 +86,16 @@ export default function Timeline({
             }`}
           >
             {image ? (
-              <img src={image} alt={`Frame ${i + 1}`} className="h-full w-full object-contain" />
+              <img
+                src={image}
+                alt={`Frame ${i + 1}`}
+                className="h-full w-full object-contain"
+                style={
+                  background && !background.transparent
+                    ? { background: background.color }
+                    : undefined
+                }
+              />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-sm text-zinc-500">
                 {i + 1}

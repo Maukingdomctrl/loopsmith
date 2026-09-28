@@ -122,6 +122,10 @@ interface CanvasProps {
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 8;
 const SAVE_DEBOUNCE_MS = 500;
+/** Size of a fresh drawing sheet on an empty frame. */
+const BLANK_SIZE = 512;
+/** Brush sizes on the slider (radius, canvas px): fine steps for detail work. */
+const BRUSH_SIZES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64];
 
 const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
@@ -306,7 +310,32 @@ const commit = useCallback((next: Frame) => {
   // Keep an editable surface of the base bitmap ready while a tool is active.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
-    if (!base?.image || surfaceSrc.current === base.image) return;
+    if (!base) return;
+
+    // Blank canvas: start a transparent 512×512 sheet to draw on.
+    if (!base.image) {
+      if (surfaceRef.current && surfaceSrc.current === null) return;
+      surfaceRef.current = new RasterSurface(BLANK_SIZE, BLANK_SIZE);
+      surfaceSrc.current = null;
+      if (base.size.w !== BLANK_SIZE || base.size.h !== BLANK_SIZE) {
+        const f = editRef.current;
+        commit({
+          ...f,
+          layers: f.layers.map((l) =>
+            l.id === base.id
+              ? {
+                  ...l,
+                  size: { w: BLANK_SIZE, h: BLANK_SIZE },
+                  pose: makePose(defaultFitPose(BLANK_SIZE, BLANK_SIZE)),
+                }
+              : l
+          ),
+        });
+      }
+      return;
+    }
+
+    if (surfaceSrc.current === base.image) return;
     let cancelled = false;
     const src = base.image;
     RasterSurface.fromLayer(base)
@@ -319,7 +348,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, base]);
+  }, [activeTool, base, commit]);
 
   /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
   const toLocal = useCallback((cx: number, cy: number) => {
@@ -402,12 +431,19 @@ const commit = useCallback((next: Frame) => {
     const out = surface.commit();
     if (!out) return;
     surfaceSrc.current = out.image;
-    const f = editRef.current;
-    commit({
-      ...f,
-      layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: out.image } : l)),
-      flattenKey: null,
-    });
+    // Decode the new bitmap before swapping it in, so the canvas never
+    // redraws for a moment without the stroke (the flicker on pen-up).
+    loadBitmap(out.image)
+      .catch(() => null)
+      .then(() => {
+        if (surfaceSrc.current !== out.image) return; // a newer stroke already landed
+        const f = editRef.current;
+        commit({
+          ...f,
+          layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: out.image } : l)),
+          flattenKey: null,
+        });
+      });
   }, [base, commit]);
 
   const pointSample = (e: React.PointerEvent, local: { x: number; y: number }) => ({
@@ -1449,7 +1485,9 @@ const handleCanvasPointerUp = (
   editor.tool !== "crop" &&
   (editor.selection.ids.length > 0 || editor.tool === "straighten");
 
-  const cursorClass = lassoMode || activeTool !== "none"
+  const cursorClass = activeTool === "brush" || activeTool === "eraser"
+    ? "cursor-none"
+    : lassoMode || activeTool !== "none"
     ? "cursor-crosshair"
     : editor.tool === "crop" || editor.tool === "straighten"
       ? "cursor-crosshair"
@@ -1491,7 +1529,7 @@ const handleCanvasPointerUp = (
             onImageDrop?.(file);
           }}
           onDoubleClick={() => {
-            if (!isPlaying && !hasPixels) onImport?.();
+            if (!isPlaying && !hasPixels && activeTool === "none") onImport?.();
           }}
           
 onPointerCancel={(e) => {
@@ -1578,9 +1616,20 @@ onPointerCancel={(e) => {
               />
             )}
 
-            {!hasPixels && (
-              <div className="pointer-events-none absolute inset-0 flex h-full items-center justify-center font-medium text-gray-500">
-                Double-click to import PNG
+            {!hasPixels && activeTool === "none" && !isPlaying && (
+              <div className="pointer-events-none absolute inset-0 flex h-full items-center justify-center gap-3">
+                <button
+                  onClick={() => setPaintTool("brush")}
+                  className="pointer-events-auto rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                >
+                  Start drawing
+                </button>
+                <button
+                  onClick={() => onImport?.()}
+                  className="pointer-events-auto rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600"
+                >
+                  Import image
+                </button>
               </div>
             )}
 
@@ -1630,6 +1679,8 @@ onPointerCancel={(e) => {
             <BrushCursor
               position={brushPos}
               radius={brushSize}
+              angle={-view.rotation}
+              color={paintColor}
               erasing={activeTool === "eraser"}
               visible={activeTool === "brush" || activeTool === "eraser"}
             />
@@ -1700,7 +1751,7 @@ onPointerCancel={(e) => {
           ).map(([id, Icon, label]) => (
             <button
               key={id}
-              disabled={isPlaying || !hasPixels}
+              disabled={isPlaying}
               onClick={() => setPaintTool(paintTool === id ? "none" : id)}
               title={label}
               aria-label={label}
@@ -1732,13 +1783,14 @@ onPointerCancel={(e) => {
             <span className="text-zinc-300">Size</span>
             <input
               type="range"
-              min={1}
-              max={64}
-              value={brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
+              min={0}
+              max={BRUSH_SIZES.length - 1}
+              step={1}
+              value={Math.max(0, BRUSH_SIZES.indexOf(brushSize))}
+              onChange={(e) => setBrushSize(BRUSH_SIZES[Number(e.target.value)])}
               className="w-28 accent-indigo-500"
             />
-            <span className="w-6 text-right tabular-nums">{brushSize}</span>
+            <span className="w-8 text-right tabular-nums">{brushSize}</span>
           </div>
         )}
 
