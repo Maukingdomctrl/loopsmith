@@ -17,7 +17,7 @@ import {
   Redo2,
   X,
   Crosshair,
-  Brush,
+  Pencil,
   Eraser,
   PaintBucket,
   Pipette,
@@ -37,15 +37,18 @@ import {
 } from "@/lib/frameTransform";
 import { matApply, matInvert } from "@/lib/geometry/mat2d";
 import { RasterSurface } from "@/lib/raster/surface";
-import { BrushStroke } from "@/lib/raster/brush";
-import { EraserStroke } from "@/lib/raster/eraser";
 import { floodFill } from "@/lib/raster/floodFill";
 import { parseHex, toHex } from "@/lib/raster/color";
 import {
-  DEFAULT_BRUSH,
-  DEFAULT_ERASER,
-  normalizePressure,
-} from "@/lib/raster/constants";
+  PENCIL_MAX_SIZE,
+  PENCIL_MIN_SIZE,
+  createStrokeId,
+  seedFromString,
+  type PencilStroke,
+} from "@/lib/pencil/types";
+import { widthFactor } from "@/lib/pencil/render";
+import { bakeLayerStrokes } from "@/lib/pencil/bake";
+import { markLiveStroke, onStrokeRefine } from "@/lib/layers/composite";
 import type { FloodFillSettings } from "@/types/raster";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
@@ -124,8 +127,16 @@ const ZOOM_MAX = 8;
 const SAVE_DEBOUNCE_MS = 500;
 /** Size of a fresh drawing sheet on an empty frame. */
 const BLANK_SIZE = 512;
-/** Brush sizes on the slider (radius, canvas px): fine steps for detail work. */
-const BRUSH_SIZES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64];
+/** Pressure used for a mouse, which reports none. */
+const MOUSE_PRESSURE = 0.62;
+
+/** Size slider: continuous and logarithmic, so small sizes get most of the
+ *  travel. 0…1000 ↔ PENCIL_MIN_SIZE…PENCIL_MAX_SIZE. */
+const SIZE_SPAN = Math.log(PENCIL_MAX_SIZE / PENCIL_MIN_SIZE);
+const sizeToSlider = (s: number) => (1000 * Math.log(s / PENCIL_MIN_SIZE)) / SIZE_SPAN;
+const sliderToSize = (v: number) => PENCIL_MIN_SIZE * Math.exp((v / 1000) * SIZE_SPAN);
+const formatSize = (s: number) =>
+  s < 1 ? s.toFixed(2) : s < 10 ? s.toFixed(1) : s.toFixed(0);
 
 const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
@@ -275,23 +286,26 @@ const commit = useCallback((next: Frame) => {
 
   /** Any layer with pixels. Replaces the old `frame.image` emptiness test. */
   const hasPixels = useMemo(
-    () => frame.layers.some((l) => l.image),
+    () => frame.layers.some((l) => l.image || l.strokes?.length),
     [frame.layers]
   );
 
   /* ================================================================ */
-  /*  Paint tools — wired to the lib/raster engine                     */
+  /*  Paint tools                                                       */
   /*                                                                   */
-  /*  All tools edit the BASE LAYER's own pixels (layer-local space),   */
-  /*  so results survive move/zoom/stabilize, show on any background,   */
-  /*  and are included in the export. One stroke = one undo step.       */
+  /*  Pencil and eraser record STROKE PHYSICS on the base layer         */
+  /*  (lib/pencil); the compositor renders them analytically at every   */
+  /*  resolution. Fill works on pixels (lib/raster) and folds strokes   */
+  /*  into the bitmap first. One stroke = one undo step.                */
   /* ================================================================ */
 
   type PaintTool = "none" | "brush" | "eraser" | "fill" | "picker";
   const [paintTool, setPaintTool] = useState<PaintTool>("none");
-  const [paintColor, setPaintColor] = useState("#000000");
-  /** Brush radius in CANVAS px, so it matches the on-screen cursor. */
-  const [brushSize, setBrushSize] = useState(8);
+  const [paintColor, setPaintColor] = useState("#2b2b2b");
+  /** Pencil tip radius at full pressure, in CANVAS px (continuous). */
+  const [brushSize, setBrushSize] = useState(1.5);
+  /** Live pen pressure, so the cursor tip shows the width being drawn. */
+  const [tipPressure, setTipPressure] = useState(MOUSE_PRESSURE);
 
   /** The panel's "Eraser brush" switch still works: it maps to the eraser tool. */
   const activeTool: PaintTool =
@@ -303,20 +317,17 @@ const commit = useCallback((next: Frame) => {
 
   const surfaceRef = useRef<RasterSurface | null>(null);
   const surfaceSrc = useRef<string | null>(null);
-  const strokeRef = useRef<BrushStroke | EraserStroke | null>(null);
+  /** The stroke being drawn: its samples grow in place until pen-up. */
+  const liveRef = useRef<{ stroke: PencilStroke & { pts: number[] }; t0: number } | null>(null);
   const previewRaf = useRef(0);
-  const scratchRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Keep an editable surface of the base bitmap ready while a tool is active.
+  // Tools need a sheet: an empty base layer becomes a 512×512 page. Fill needs
+  // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
     if (!base) return;
 
-    // Blank canvas: start a transparent 512×512 sheet to draw on.
-    if (!base.image) {
-      if (surfaceRef.current && surfaceSrc.current === null) return;
-      surfaceRef.current = new RasterSurface(BLANK_SIZE, BLANK_SIZE);
-      surfaceSrc.current = null;
+    if (!base.image && !base.strokes?.length) {
       if (base.size.w !== BLANK_SIZE || base.size.h !== BLANK_SIZE) {
         const f = editRef.current;
         commit({
@@ -331,7 +342,43 @@ const commit = useCallback((next: Frame) => {
               : l
           ),
         });
+        return;
       }
+    }
+
+    if (activeTool !== "fill") return;
+
+    if (base.strokes?.length) {
+      let cancelled = false;
+      bakeLayerStrokes(base).then((image) => {
+        if (cancelled || !image) return;
+        loadBitmap(image)
+          .catch(() => null)
+          .then(() => {
+            if (cancelled) return;
+            const f = editRef.current;
+            commit({
+              ...f,
+              layers: f.layers.map((l) =>
+                l.id === base.id ? { ...l, image, strokes: [] } : l
+              ),
+              flattenKey: null,
+            });
+          });
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Blank sheet: a transparent surface of the layer's size.
+    if (!base.image) {
+      if (surfaceRef.current && surfaceSrc.current === null) return;
+      surfaceRef.current = new RasterSurface(
+        Math.max(1, Math.round(base.size.w)),
+        Math.max(1, Math.round(base.size.h))
+      );
+      surfaceSrc.current = null;
       return;
     }
 
@@ -358,36 +405,23 @@ const commit = useCallback((next: Frame) => {
   }, []);
 
   const surfaceReady = () =>
-    !!surfaceRef.current && !!base && surfaceSrc.current === base.image;
+    !!surfaceRef.current &&
+    !!base &&
+    !base.strokes?.length &&
+    surfaceSrc.current === base.image;
 
   /**
-   * Live preview while a stroke is in progress: repaint the composite with the
-   * base layer hidden, then draw the working surface through the layer matrix.
+   * Live preview while a stroke is in progress: the normal composite, with the
+   * live stroke appended to the base layer. Earlier strokes come from the
+   * compositor's cache, so only the live stroke is rendered each frame.
    */
   const paintPreview = useCallback(() => {
     previewRaf.current = 0;
     const canvas = baseCanvasRef.current;
-    const surface = surfaceRef.current;
-    const stroke = strokeRef.current;
-    if (!canvas || !surface || !stroke || !base) return;
+    const live = liveRef.current;
+    if (!canvas || !live || !base) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    stroke.previewInto();
-
-    let scratch = scratchRef.current;
-    if (!scratch) {
-      scratch = document.createElement("canvas");
-      scratchRef.current = scratch;
-    }
-    if (scratch.width !== surface.width) scratch.width = surface.width;
-    if (scratch.height !== surface.height) scratch.height = surface.height;
-    const sctx = scratch.getContext("2d");
-    if (!sctx) return;
-    const { data } = surface.toImageData();
-    const px = new Uint8ClampedArray(new ArrayBuffer(data.length));
-    px.set(data);
-    sctx.putImageData(new ImageData(px, surface.width, surface.height), 0, 0);
 
     const f = editRef.current;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -396,19 +430,13 @@ const commit = useCallback((next: Frame) => {
       ctx,
       {
         ...f,
-        layers: f.layers.map((l) => (l.id === base.id ? { ...l, visible: false } : l)),
+        layers: f.layers.map((l) =>
+          l.id === base.id ? { ...l, strokes: [...(l.strokes ?? []), live.stroke] } : l
+        ),
       },
       CANVAS_SIZE,
       { background, resolve: domResolver(), checkerboard: true }
     );
-
-    const m = baseLayerMatrix(f);
-    if (!m) return;
-    ctx.save();
-    ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(scratch, 0, 0);
-    ctx.restore();
   }, [base, background]);
 
   const schedulePreview = useCallback(() => {
@@ -446,14 +474,53 @@ const commit = useCallback((next: Frame) => {
       });
   }, [base, commit]);
 
-  const pointSample = (e: React.PointerEvent, local: { x: number; y: number }) => ({
-    x: local.x,
-    y: local.y,
-    pressure: normalizePressure(e.pressure, e.pointerType === "pen"),
-    tilt: 0,
-    twist: 0,
-    time: e.timeStamp,
-  });
+  /**
+   * One pencil sample: layer-space position (float, unrounded), pressure at
+   * full device precision, tilt and lean direction (converted into layer
+   * space), barrel twist and time.
+   */
+  const pencilSample = (ev: PointerEvent, t0: number): number[] | null => {
+    const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
+    const p = screenToCanvas({ x: ev.clientX, y: ev.clientY }, rect, view);
+    const m = baseLayerMatrix(editRef.current);
+    const inv = m ? matInvert(m) : null;
+    if (!inv) return null;
+    const local = matApply(inv, p);
+
+    const isPen = ev.pointerType === "pen";
+    const pressure = isPen
+      ? Math.min(1, Math.max(0, ev.pressure))
+      : ev.pointerType === "touch" && ev.pressure > 0 && ev.pressure !== 0.5
+        ? Math.min(1, ev.pressure)
+        : MOUSE_PRESSURE;
+
+    let tilt = 0;
+    let azimuth = 0;
+    if (isPen) {
+      const pe = ev as PointerEvent & { altitudeAngle?: number; azimuthAngle?: number };
+      let altitude: number;
+      let screenAz: number;
+      if (typeof pe.altitudeAngle === "number" && typeof pe.azimuthAngle === "number") {
+        altitude = pe.altitudeAngle;
+        screenAz = pe.azimuthAngle;
+      } else {
+        const tx = Math.tan(((ev.tiltX ?? 0) * Math.PI) / 180);
+        const ty = Math.tan(((ev.tiltY ?? 0) * Math.PI) / 180);
+        const lean = Math.hypot(tx, ty);
+        altitude = lean > 0 ? Math.atan(1 / lean) : Math.PI / 2;
+        screenAz = Math.atan2(ty, tx);
+      }
+      // Ignore the first ~10° of lean (a pen is never perfectly upright).
+      tilt = Math.min(1, Math.max(0, (Math.PI / 2 - altitude - 0.17) / 0.87));
+      // Screen direction → canvas (undo view rotation) → layer space.
+      const va = screenAz - (view.rotation * Math.PI) / 180;
+      const dx = Math.cos(va);
+      const dy = Math.sin(va);
+      azimuth = Math.atan2(inv.b * dx + inv.d * dy, inv.a * dx + inv.c * dy);
+    }
+    const twist = (((ev as PointerEvent).twist ?? 0) * Math.PI) / 180;
+    return [local.x, local.y, pressure, tilt, azimuth, twist, ev.timeStamp - t0];
+  };
 
   /** Returns true when a paint tool consumed the event. */
   const paintDown = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
@@ -478,13 +545,13 @@ const commit = useCallback((next: Frame) => {
       return true;
     }
 
-    if (!surfaceReady()) return true;
     const local = toLocal(p.x, p.y);
     if (!local || !base) return true;
-    const surface = surfaceRef.current!;
-    const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
 
     if (activeTool === "fill") {
+      if (!surfaceReady()) return true;
+      const surface = surfaceRef.current!;
+      const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
       onHistoryCommit?.();
       const res = floodFill(surface, {
         seed: local,
@@ -501,36 +568,57 @@ const commit = useCallback((next: Frame) => {
       return true;
     }
 
-    // brush / eraser
+    // pencil / eraser: record the stroke's physics
     onHistoryCommit?.();
     e.currentTarget.setPointerCapture(e.pointerId);
-    const radius = brushSize / Math.max(1e-6, Math.abs(base.pose.scale.x));
-    strokeRef.current =
-      activeTool === "eraser"
-        ? new EraserStroke(surface, { ...DEFAULT_ERASER, radius })
-        : new BrushStroke(surface, { ...DEFAULT_BRUSH, radius, color });
-    strokeRef.current.addSample(pointSample(e, local));
+    const scale = Math.max(1e-6, Math.abs(base.pose.scale.x));
+    const stroke: PencilStroke & { pts: number[] } = {
+      id: createStrokeId(),
+      kind: activeTool === "eraser" ? "erase" : "graphite",
+      color: paintColor,
+      size: brushSize / scale,
+      seed: base.strokes?.[0]?.seed ?? seedFromString(base.id),
+      pts: [],
+    };
+    markLiveStroke(stroke);
+    const t0 = e.timeStamp;
+    const first = pencilSample(e.nativeEvent, t0);
+    if (first) {
+      stroke.pts.push(...first);
+      setTipPressure(first[2]);
+    }
+    liveRef.current = { stroke, t0 };
     schedulePreview();
     return true;
   };
 
   const paintMove = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
-    const stroke = strokeRef.current;
-    if (!stroke) return false;
-    const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
-    const p = screenToCanvas({ x: e.clientX, y: e.clientY }, rect, view);
-    const local = toLocal(p.x, p.y);
-    if (local) {
-      stroke.addSample(pointSample(e, local));
-      schedulePreview();
+    const live = liveRef.current;
+    if (!live) return false;
+    // Pens report far more samples than frames: take every one of them.
+    const native = e.nativeEvent;
+    const batch = native.getCoalescedEvents?.() ?? [];
+    const pts = live.stroke.pts;
+    for (const ev of batch.length ? batch : [native]) {
+      const smp = pencilSample(ev, live.t0);
+      if (!smp) continue;
+      const n = pts.length;
+      if (n >= 7) {
+        const d = Math.hypot(smp[0] - pts[n - 7], smp[1] - pts[n - 6]);
+        if (d < 0.01 && Math.abs(smp[2] - pts[n - 5]) < 0.01) continue;
+      }
+      pts.push(...smp);
     }
+    if (pts.length >= 7) setTipPressure(pts[pts.length - 5]);
+    schedulePreview();
     return true;
   };
 
   const paintUp = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
-    const stroke = strokeRef.current;
-    if (!stroke) return activeTool !== "none";
-    strokeRef.current = null;
+    const live = liveRef.current;
+    if (!live) return activeTool !== "none";
+    liveRef.current = null;
+    setTipPressure(MOUSE_PRESSURE);
     if (previewRaf.current) {
       cancelAnimationFrame(previewRaf.current);
       previewRaf.current = 0;
@@ -538,9 +626,19 @@ const commit = useCallback((next: Frame) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-    const region = stroke.end();
-    if (region) commitSurface();
-    else setDecodeGeneration((g) => g + 1); // nothing drawn: repaint normally
+    if (!base || live.stroke.pts.length === 0) {
+      setDecodeGeneration((g) => g + 1);
+      return true;
+    }
+    const done: PencilStroke = { ...live.stroke, pts: live.stroke.pts.slice() };
+    const f = editRef.current;
+    commit({
+      ...f,
+      layers: f.layers.map((l) =>
+        l.id === base.id ? { ...l, strokes: [...(l.strokes ?? []), done] } : l
+      ),
+      flattenKey: null,
+    });
     return true;
   };
 
@@ -554,7 +652,7 @@ const commit = useCallback((next: Frame) => {
       const map: Record<string, PaintTool> = { b: "brush", e: "eraser", g: "fill", i: "picker" };
       if (map[k]) {
         setPaintTool((cur) => (cur === map[k] ? "none" : map[k]));
-      } else if (e.key === "Escape" && !strokeRef.current) {
+      } else if (e.key === "Escape" && !liveRef.current) {
         setPaintTool("none");
       }
     };
@@ -741,6 +839,10 @@ const commit = useCallback((next: Frame) => {
     };
   }, [editFrame.layers, editor, isPlaying]);
 
+  // A pencil layer shown as a stand-in during a view change has been rendered
+  // exactly: repaint.
+  useEffect(() => onStrokeRefine(() => setDecodeGeneration((g) => g + 1)), []);
+
   /* ---------- Base layer (full composite) ---------- */
 
   /**
@@ -766,6 +868,7 @@ const commit = useCallback((next: Frame) => {
     background,
     resolve: domResolver(),
     checkerboard: true,
+    interactive: true,
   });
 
   // NEW — apply transparency mask
@@ -806,7 +909,7 @@ const commit = useCallback((next: Frame) => {
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
     if (!onionSkin || !previousFrame) return;
-    if (!previousFrame.layers.some((l) => l.image && l.visible)) return;
+    if (!previousFrame.layers.some((l) => (l.image || l.strokes?.length) && l.visible)) return;
 
     drawFrameLayers(ctx, previousFrame, CANVAS_SIZE, {
       background: ONION_BACKGROUND,
@@ -878,6 +981,8 @@ const commit = useCallback((next: Frame) => {
               size: { w: width, h: height },
               crop: null,
               pose: makePose(defaultFitPose(width, height)),
+              // The cut came from the rendered canvas, strokes included.
+              strokes: [],
             }
           : l
       );
@@ -1678,7 +1783,7 @@ onPointerCancel={(e) => {
             />
             <BrushCursor
               position={brushPos}
-              radius={brushSize}
+              radius={brushSize * widthFactor(tipPressure)}
               angle={-view.rotation}
               color={paintColor}
               erasing={activeTool === "eraser"}
@@ -1743,7 +1848,7 @@ onPointerCancel={(e) => {
         <div className="absolute left-3 top-3 z-50 flex flex-col gap-2 rounded-xl bg-black/60 p-1.5">
           {(
             [
-              ["brush", Brush, "Brush (B)"],
+              ["brush", Pencil, "Pencil (B)"],
               ["eraser", Eraser, "Eraser (E)"],
               ["fill", PaintBucket, "Fill (G)"],
               ["picker", Pipette, "Pick colour (I)"],
@@ -1784,13 +1889,13 @@ onPointerCancel={(e) => {
             <input
               type="range"
               min={0}
-              max={BRUSH_SIZES.length - 1}
-              step={1}
-              value={Math.max(0, BRUSH_SIZES.indexOf(brushSize))}
-              onChange={(e) => setBrushSize(BRUSH_SIZES[Number(e.target.value)])}
+              max={1000}
+              step="any"
+              value={sizeToSlider(brushSize)}
+              onChange={(e) => setBrushSize(sliderToSize(Number(e.target.value)))}
               className="w-28 accent-indigo-500"
             />
-            <span className="w-8 text-right tabular-nums">{brushSize}</span>
+            <span className="w-8 text-right tabular-nums">{formatSize(brushSize)}</span>
           </div>
         )}
 

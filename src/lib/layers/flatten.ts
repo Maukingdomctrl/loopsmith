@@ -32,6 +32,9 @@ export function layerStateKey(layers: readonly Layer[]): string {
     parts.push(
       l.id,
       l.image ? String(l.image.length) : "0",
+      l.strokes?.length
+        ? `${l.strokes.length}:${l.strokes[0].id}:${l.strokes[l.strokes.length - 1].id}`
+        : "-",
       l.visible ? "1" : "0",
       roundTo(l.opacity, 4).toString(),
       l.blend,
@@ -125,7 +128,7 @@ export function flattenFrame(
 export function nativeSurfaceFor(layers: readonly Layer[]): number {
   let max = 0;
   for (const l of layers) {
-    if (!l.image) continue;
+    if (!l.image && !l.strokes?.length) continue;
     max = Math.max(max, l.size.w, l.size.h);
   }
   return max > 0 ? Math.min(max, CANVAS_SIZE) : CANVAS_SIZE;
@@ -202,7 +205,7 @@ export function reflattenIfStale(frame: Frame): Frame {
   if (frame.flattenKey === key && frame.image) return frame;
   // No pixels anywhere: keep the frame empty so playback and the timeline
   // still treat it as a blank frame.
-  if (!frame.layers.some((l) => l.image)) {
+  if (!frame.layers.some((l) => l.image || l.strokes?.length)) {
     return { ...frame, image: null, flattenKey: key };
   }
   const out = flattenFrame(frame.layers, { crop: frame.crop });

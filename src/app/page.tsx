@@ -893,7 +893,7 @@ const frames = activeProject?.frames.length
 
         const targetId = frame.activeLayerId;
         const layers = frame.layers.map((l) =>
-          l.id === targetId ? { ...l, image: null, crop: null } : l
+          l.id === targetId ? { ...l, image: null, crop: null, strokes: [] } : l
         );
 
         return syncBaseFromLegacy({

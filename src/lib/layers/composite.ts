@@ -21,9 +21,12 @@ import type { Rect } from "@/types/geometry";
 import type { CanvasBackground, DocumentCrop, Layer } from "@/types/layer";
 import { BLEND_TO_COMPOSITE, isLayerRenderable } from "@/types/layer";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
-import { matSetTransform, matChain, matScale } from "@/lib/geometry/mat2d";
+import { matSetTransform, matChain, matScale, matInvert } from "@/lib/geometry/mat2d";
 import { rectIsEmpty, rectNormalize } from "@/lib/geometry/rect";
 import { layerContentBox, layerMatrix } from "./layerSpace";
+import type { Mat2D } from "@/types/geometry";
+import type { PencilStroke } from "@/lib/pencil/types";
+import { renderStrokes, strokesBounds } from "@/lib/pencil/render";
 
 export type Surface2D =
   | CanvasRenderingContext2D
@@ -55,6 +58,9 @@ export interface CompositeOptions {
   /** Nearest-neighbour keeps pixel art crisp and, more importantly, makes the
    *  output byte-identical across browsers. */
   readonly smoothing?: boolean;
+  /** Interactive view (not export): while the view is changing, pencil
+   *  layers may show a resampled stand-in and refine a moment later. */
+  readonly interactive?: boolean;
 }
 
 export const DEFAULT_COMPOSITE: Omit<CompositeOptions, "background"> = {
@@ -160,7 +166,8 @@ export function compositeLayers(
     if (allow && !allow.has(layer.id)) continue;
 
     const bitmap = resolve(layer);
-    if (!bitmap) continue;
+    // Undecoded pixels: skip until they decode (the caller repaints then).
+    if (layer.image && !bitmap) continue;
 
     drawLayer(ctx, layer, bitmap, docScale, smoothing, options);
   }
@@ -171,7 +178,7 @@ export function compositeLayers(
 function drawLayer(
   ctx: Surface2D,
   layer: Layer,
-  bitmap: LayerBitmap,
+  bitmap: LayerBitmap | null,
   docScale: number,
   smoothing: boolean,
   options: CompositeOptions
@@ -181,6 +188,22 @@ function drawLayer(
 
   const matrix = matChain(matScale(docScale, docScale), layerMatrix(layer));
   const composite = BLEND_TO_COMPOSITE[layer.blend] ?? "source-over";
+
+  if (layer.strokes?.length) {
+    const iso = layerWithStrokes(
+      layer, bitmap, matrix, box, smoothing, options.surface, options.interactive ?? false
+    );
+    if (!iso) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = (options.globalAlpha ?? 1) * layer.opacity;
+    ctx.globalCompositeOperation = composite;
+    ctx.drawImage(iso as CanvasImageSource, 0, 0);
+    ctx.restore();
+    return;
+  }
+  if (!bitmap) return;
+
   const needsIsolation = composite !== "source-over";
 
   if (!needsIsolation) {
@@ -216,6 +239,173 @@ function drawLayer(
   ctx.globalCompositeOperation = composite;
   ctx.drawImage(iso.canvas as CanvasImageSource, 0, 0);
   ctx.restore();
+}
+
+/* ---------------- pencil strokes ---------------- */
+
+/**
+ * Pencil strokes are rendered analytically, at this surface's resolution, on
+ * top of the layer's own pixels, in an isolation buffer (erase strokes must
+ * remove imported pixels too, and nothing beneath the layer).
+ *
+ * Rendering is a pure function of (pixels, strokes, matrix, surface), so the
+ * result is cached. A layer whose stroke list EXTENDS a cached one reuses it
+ * and renders only the new strokes — which is what keeps live drawing and
+ * pen-up cheap however many strokes the layer already holds.
+ */
+interface StrokeCacheEntry {
+  readonly strokes: readonly PencilStroke[];
+  readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+}
+
+const strokeCache = new Map<string, StrokeCacheEntry[]>();
+const STROKE_CACHE_MAX = 48;
+let strokeCacheCount = 0;
+
+/** The last exact render of each layer, for interactive stand-ins. */
+const lastExact = new Map<
+  string,
+  {
+    readonly strokes: readonly PencilStroke[];
+    readonly image: string | null;
+    readonly matrix: Mat2D;
+    readonly surface: number;
+    readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  }
+>();
+const refineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const refineListeners = new Set<() => void>();
+/** Refinement delay after the view stops changing. */
+const REFINE_MS = 150;
+
+/** Called when a deferred exact render has landed; the view should repaint. */
+export function onStrokeRefine(cb: () => void): () => void {
+  refineListeners.add(cb);
+  return () => {
+    refineListeners.delete(cb);
+  };
+}
+
+/** Strokes still being drawn: rendered, never cached. */
+const liveStrokes = new WeakSet<PencilStroke>();
+export const markLiveStroke = (s: PencilStroke) => liveStrokes.add(s);
+
+function isPrefix(a: readonly PencilStroke[], b: readonly PencilStroke[]): boolean {
+  if (a.length > b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function layerWithStrokes(
+  layer: Layer,
+  bitmap: LayerBitmap | null,
+  matrix: Mat2D,
+  box: Rect,
+  smoothing: boolean,
+  surface: number,
+  interactive: boolean
+): HTMLCanvasElement | OffscreenCanvas | null {
+  const strokes = layer.strokes ?? [];
+  const m = matrix;
+  const key = [
+    layer.id,
+    layer.image ? `${layer.image.length}:${layer.image.slice(-32)}` : "-",
+    `${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}`,
+    surface,
+    `${box.x},${box.y},${box.w},${box.h}`,
+    smoothing ? 1 : 0,
+  ].join("|");
+
+  const entries = strokeCache.get(key) ?? [];
+  let base: StrokeCacheEntry | null = null;
+  for (const e of entries) {
+    if (e.strokes === strokes) {
+      lastExact.set(layer.id, { strokes, image: layer.image, matrix, surface, canvas: e.canvas });
+      return e.canvas;
+    }
+    if (isPrefix(e.strokes, strokes) && (!base || e.strokes.length > base.strokes.length)) base = e;
+  }
+
+  // The view is changing (zoom, move, rotate): stretch the last exact render
+  // for now and render exactly once it settles. Rendering every intermediate
+  // step of a zoom drag would stall it.
+  if (!base && interactive) {
+    const prev = lastExact.get(layer.id);
+    const inv = prev ? matInvert(prev.matrix) : null;
+    if (prev && inv && prev.strokes === strokes && prev.image === layer.image && prev.surface === surface) {
+      const stand = createSurface(surface);
+      if (stand) {
+        stand.ctx.save();
+        stand.ctx.imageSmoothingEnabled = true;
+        matSetTransform(stand.ctx as CanvasRenderingContext2D, matChain(matrix, inv));
+        stand.ctx.drawImage(prev.canvas as CanvasImageSource, 0, 0);
+        stand.ctx.restore();
+        clearTimeout(refineTimers.get(layer.id));
+        refineTimers.set(
+          layer.id,
+          setTimeout(() => {
+            refineTimers.delete(layer.id);
+            layerWithStrokes(layer, bitmap, matrix, box, smoothing, surface, false);
+            refineListeners.forEach((cb) => cb());
+          }, REFINE_MS)
+        );
+        return stand.canvas;
+      }
+    }
+  }
+
+  const iso = createSurface(surface);
+  if (!iso) return null;
+  let todo: readonly PencilStroke[] = strokes;
+  if (base) {
+    iso.ctx.drawImage(base.canvas as CanvasImageSource, 0, 0);
+    todo = strokes.slice(base.strokes.length);
+  } else if (bitmap) {
+    iso.ctx.save();
+    iso.ctx.imageSmoothingEnabled = smoothing;
+    matSetTransform(iso.ctx as CanvasRenderingContext2D, matrix);
+    drawCropped(iso.ctx, bitmap, box);
+    iso.ctx.restore();
+  }
+
+  const b = strokesBounds(todo, matrix);
+  if (b) {
+    const x0 = Math.max(0, b.x0), y0 = Math.max(0, b.y0);
+    const x1 = Math.min(surface, b.x1), y1 = Math.min(surface, b.y1);
+    if (x1 > x0 && y1 > y0) {
+      const img = iso.ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+      renderStrokes(img, x0, y0, todo, {
+        matrix,
+        surfaceW: surface,
+        surfaceH: surface,
+        clip: box,
+      });
+      iso.ctx.putImageData(img, x0, y0);
+    }
+  }
+
+  const last = strokes[strokes.length - 1];
+  if (!last || !liveStrokes.has(last)) {
+    lastExact.set(layer.id, { strokes, image: layer.image, matrix, surface, canvas: iso.canvas });
+    if (lastExact.size > STROKE_CACHE_MAX) lastExact.delete(lastExact.keys().next().value as string);
+    entries.push({ strokes, canvas: iso.canvas });
+    strokeCache.delete(key);
+    strokeCache.set(key, entries);
+    strokeCacheCount++;
+    // Keep the newest few per key and a bounded total.
+    if (entries.length > 3) {
+      entries.shift();
+      strokeCacheCount--;
+    }
+    while (strokeCacheCount > STROKE_CACHE_MAX) {
+      const oldestKey = strokeCache.keys().next().value as string;
+      const list = strokeCache.get(oldestKey)!;
+      list.shift();
+      strokeCacheCount--;
+      if (!list.length) strokeCache.delete(oldestKey);
+    }
+  }
+  return iso.canvas;
 }
 
 /** Draw only the cropped sub-rect, positioned so local coordinates still line

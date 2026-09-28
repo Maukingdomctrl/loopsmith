@@ -22,9 +22,14 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 ## Architecture rules
 - Frames hold layers; the **base layer** holds the artwork. Pose = position/scale/rotation (see `lib/layers/layerSpace.ts`).
 - Canvas → layer pixel: invert `baseLayerMatrix(frame)` from `lib/frameTransform.ts` (includes stabilization offset).
-- **All paint tools edit the base layer's own pixels**, never a screen-space mask. They use the
-  `lib/raster` engine (`RasterSurface`, `BrushStroke`, `EraserStroke`, `floodFill`) and commit via
-  `surface.commit()` → layer `image` + `flattenKey: null`. One stroke = one undo step (`onHistoryCommit`).
+- **Pencil & eraser store stroke physics, not pixels** (`lib/pencil`): each stroke is its samples
+  (x, y, pressure, tilt, azimuth, twist, time) in base-layer space, kept in `layer.strokes`. The
+  compositor (`lib/layers/composite.ts`) renders them analytically at every resolution (view,
+  flatten, GIF) over the layer's `image`: spline + signed-distance edges, procedural paper
+  (`paper.ts`), no stamps. Renders are cached; views show a stand-in while zooming, then refine.
+- **Fill works on pixels** (`lib/raster`: `RasterSurface`, `floodFill`, commit via `surface.commit()`).
+  Before fill or the lasso touch a layer, its strokes are baked into `image` (`pencil/bake.ts`).
+- Every paint edit is one undo step (`onHistoryCommit`) and sets `flattenKey: null`.
 - Background is document state (`CanvasBackground`); checkerboard is view-only and never exported.
 - Page layout is a fixed flex frame (Toolbar / sidebars / Canvas / Timeline). Nothing should shift size.
 

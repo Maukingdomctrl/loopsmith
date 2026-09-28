@@ -11,6 +11,7 @@
 
 import type { Rect, Vec2 } from "@/types/geometry";
 import type { Pose } from "@/lib/geometry/pose";
+import type { PencilStroke } from "@/lib/pencil/types";
 
 export type LayerKind = "base" | "raster";
 
@@ -64,7 +65,16 @@ export interface Layer {
   readonly visible: boolean;
   readonly locked: boolean;
   readonly blend: BlendMode;
+
+  /** Pencil strokes, stored as recorded physics in layer space and drawn over
+   *  `image` analytically at render time. Never baked unless a pixel tool
+   *  (fill, lasso) needs pixels. */
+  readonly strokes?: readonly PencilStroke[];
 }
+
+/** Has something to draw: pixels or pencil strokes. */
+export const layerHasContent = (l: Layer): boolean =>
+  !!l.image || !!l.strokes?.length;
 
 /** Document-level crop, in canvas space. Distinct from layer crop because a
  *  rotated layer's intersection with a canvas-space rect is not a local rect —
@@ -108,4 +118,4 @@ export const isBaseLayer = (l: Layer): boolean => l.kind === "base";
 export const isLayerEditable = (l: Layer): boolean => !l.locked;
 
 export const isLayerRenderable = (l: Layer): boolean =>
-  l.visible && l.opacity > 0 && !!l.image;
+  l.visible && l.opacity > 0 && layerHasContent(l);
