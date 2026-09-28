@@ -62,7 +62,7 @@ export function saveHistory(
   } catch {
     /* ignore */
   }
-}
+} 
 
 /** Transforms are tiny; bitmaps are not. Images live in IndexedDB keyed by
  *  frame id, so history only needs to remember WHICH image, not its bytes. */

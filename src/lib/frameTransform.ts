@@ -18,6 +18,9 @@ import { layerMatrix } from "@/lib/layers/layerSpace";
 
 import type { Mat2D } from "@/types/geometry";
 
+
+
+
 export const CANVAS_SIZE = 512;
 
 /** What a renderer actually needs. Note the absence of `stab`: by the time a

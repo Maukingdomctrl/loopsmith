@@ -30,6 +30,7 @@ import {
   isBakeable,
   isFlatDocument,
   clearTransforms,
+  baseLayerMatrix,
 } from "@/lib/frameTransform";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
@@ -45,6 +46,8 @@ import { defaultFitPose, screenToCanvas } from "@/lib/layers/layerSpace";
 import { makePose } from "@/lib/geometry/pose";
 import type { TransparencyState } from "@/hooks/useTransparency";
 import BrushCursor from "./BrushCursor";
+
+import { matApply, matInvert } from "@/lib/geometry/mat2d";
 
 export type CanvasView = {
   x: number;
@@ -214,48 +217,7 @@ const commit = useCallback((next: Frame) => {
   onChangeRef.current(next);
 }, []);
 
-/* ---------- Transparency Mask ---------- */
 
-const ensureMask = useCallback(() => {
-  const size = CANVAS_SIZE * CANVAS_SIZE;
-
-  return (
-    editRef.current.transparency ?? {
-      width: CANVAS_SIZE,
-      height: CANVAS_SIZE,
-      alpha: new Uint8ClampedArray(size).fill(255),
-    }
-  );
-}, []);
-
-const eraseCircle = useCallback(
-  (cx: number, cy: number, r = 16) => {
-    if (!transparency.enabled || transparency.tool !== "brush") return;
-
-    const mask = ensureMask();
-    const alpha = new Uint8ClampedArray(mask.alpha);
-
-    for (let y = -r; y <= r; y++) {
-      for (let x = -r; x <= r; x++) {
-        if (x * x + y * y > r * r) continue;
-
-        const px = Math.round(cx + x);
-        const py = Math.round(cy + y);
-
-        if (px < 0 || py < 0 || px >= CANVAS_SIZE || py >= CANVAS_SIZE)
-          continue;
-
-        alpha[py * CANVAS_SIZE + px] = 0;
-      }
-    }
-
-    commit({
-      ...editRef.current,
-      transparency: { ...mask, alpha },
-    });
-  },
-  [transparency, ensureMask, commit]
-);
 
 
   /* ---------- Layer targets ---------- */
@@ -342,10 +304,92 @@ const eraseCircle = useCallback(
     };
   }, [transformsLocked, view.rotation, view.x, view.y, hasPixels]);
 
-  useEffect(() => {
+    useEffect(() => {
     onSelectionActiveChange?.(selectionActive);
   }, [selectionActive, onSelectionActiveChange]);
 
+  
+  
+    /* ---------- Eraser: edits the base layer's own pixels ---------- */
+  const ERASER_RADIUS = 16; // canvas px, matches BrushCursor
+  const eraseSurface = useRef<HTMLCanvasElement | null>(null);
+  const eraseSource = useRef<string | null>(null);
+  const eraseDirty = useRef(false);
+
+  // Keep an editable copy of the base bitmap ready while the eraser is on.
+  useEffect(() => {
+    if (!transparency.enabled || !base?.image) return;
+    if (eraseSource.current === base.image) return;
+    let cancelled = false;
+    const src = base.image;
+    loadBitmap(src)
+      .then((img) => {
+        if (cancelled) return;
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        c.getContext("2d")?.drawImage(img, 0, 0);
+        eraseSurface.current = c;
+        eraseSource.current = src;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [transparency.enabled, base?.image]);
+
+  const eraseCircle = useCallback(
+    (cx: number, cy: number) => {
+      if (!transparency.enabled || transparency.tool !== "brush") return;
+      const surface = eraseSurface.current;
+      if (!surface || !base || eraseSource.current !== base.image) return;
+
+      // Canvas point → pixel of the artwork (includes position, zoom, rotation, stabilize).
+      const m = baseLayerMatrix(editRef.current);
+      const inv = m ? matInvert(m) : null;
+      if (!inv) return;
+      const local = matApply(inv, { x: cx, y: cy });
+      const r = ERASER_RADIUS / Math.max(1e-6, Math.abs(base.pose.scale.x));
+
+      const ctx = surface.getContext("2d");
+      if (!ctx) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.beginPath();
+      ctx.arc(local.x, local.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Instant feedback on screen while dragging; the real result lands on release.
+      const display = baseCanvasRef.current?.getContext("2d");
+      if (display) {
+        display.save();
+        display.globalCompositeOperation = "destination-out";
+        display.beginPath();
+        display.arc(cx, cy, ERASER_RADIUS, 0, Math.PI * 2);
+        display.fill();
+        display.restore();
+      }
+      eraseDirty.current = true;
+    },
+    [transparency.enabled, transparency.tool, base]
+  );
+
+  const finishErase = useCallback(() => {
+    const surface = eraseSurface.current;
+    if (!eraseDirty.current || !surface || !base) return;
+    eraseDirty.current = false;
+    const url = surface.toDataURL("image/png");
+    eraseSource.current = url;
+    const f = editRef.current;
+    commit({
+      ...f,
+      layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: url } : l)),
+      flattenKey: null,
+    });
+  }, [base, commit]);
+  
+  
   /**
    * Baking a selection flattens the transform into the bitmap, so the lasso is
    * only offered when the bitmap on screen is already 1:1 with the frame.
@@ -514,7 +558,7 @@ const eraseCircle = useCallback(
     const img = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
     for (let i = 0; i < mask.alpha.length; i++) {
-      img.data[i * 4 + 3] = mask.alpha[i];
+            img.data[i * 4 + 3] = Math.min(img.data[i * 4 + 3], mask.alpha[i]);
     }
 
     ctx.putImageData(img, 0, 0);
@@ -1301,6 +1345,8 @@ onPointerCancel={(e) => {
         rect,
         view
       );
+      onHistoryCommit?.();
+      e.currentTarget.setPointerCapture(e.pointerId);
       eraseCircle(p.x, p.y);
       setIsDrawing(true);
       return;
@@ -1348,6 +1394,7 @@ onPointerCancel={(e) => {
   onPointerUp={(e) => {
   if (transparency.enabled) {
     setIsDrawing(false);
+    finishErase();
 
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);

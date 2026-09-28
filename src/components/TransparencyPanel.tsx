@@ -16,65 +16,26 @@ interface Props {
 export default function TransparencyPanel({
   enabled,
   tool,
-  feather,
-  tolerance,
   onEnabledChange,
   onToolChange,
-  onFeatherChange,
-  onToleranceChange,
 }: Props) {
   return (
-    <div className="border-t border-white/10 pt-4 mt-4 space-y-3">
-      <div className="text-xs font-semibold text-zinc-400">TRANSPARENCY</div>
-
-      <label className="flex justify-between text-sm">
-        <span>Enable</span>
+    <div className="mt-3 space-y-3">
+      <label className="flex items-center justify-between text-sm">
+        <span>Eraser brush</span>
         <input
           type="checkbox"
-          checked={enabled}
-          onChange={(e) => onEnabledChange(e.target.checked)}
+          checked={enabled && tool === "brush"}
+          onChange={(e) => {
+            onToolChange("brush");
+            onEnabledChange(e.target.checked);
+          }}
+          className="accent-indigo-500"
         />
       </label>
-
-      <select
-        value={tool}
-        onChange={(e) => onToolChange(e.target.value as TransparencyTool)}
-        className="w-full rounded bg-zinc-800 p-2 text-sm"
-      >
-        <option value="brush">Brush</option>
-        <option value="lasso">Lasso</option>
-        <option value="wand">Magic Wand</option>
-      </select>
-
-      <div>
-        <div className="flex justify-between text-xs">
-          <span>Feather</span>
-          <span>{feather}px</span>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={5}
-          value={feather}
-          onChange={(e) => onFeatherChange(Number(e.target.value))}
-          className="w-full"
-        />
-      </div>
-
-      <div>
-        <div className="flex justify-between text-xs">
-          <span>Tolerance</span>
-          <span>{tolerance}</span>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={tolerance}
-          onChange={(e) => onToleranceChange(Number(e.target.value))}
-          className="w-full"
-        />
-      </div>
+      <p className="text-[11px] leading-snug text-zinc-500">
+        When on, drag on the canvas to erase. Turn it off to move the artwork again.
+      </p>
     </div>
   );
 }
