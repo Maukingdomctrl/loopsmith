@@ -17,7 +17,10 @@ import {
   Redo2,
   X,
   Crosshair,
-  
+  Brush,
+  Eraser,
+  PaintBucket,
+  Pipette,
 } from "lucide-react";
 
 import EmojiGuides from "./EmojiGuides";
@@ -32,6 +35,18 @@ import {
   clearTransforms,
   baseLayerMatrix,
 } from "@/lib/frameTransform";
+import { matApply, matInvert } from "@/lib/geometry/mat2d";
+import { RasterSurface } from "@/lib/raster/surface";
+import { BrushStroke } from "@/lib/raster/brush";
+import { EraserStroke } from "@/lib/raster/eraser";
+import { floodFill } from "@/lib/raster/floodFill";
+import { parseHex, toHex } from "@/lib/raster/color";
+import {
+  DEFAULT_BRUSH,
+  DEFAULT_ERASER,
+  normalizePressure,
+} from "@/lib/raster/constants";
+import type { FloodFillSettings } from "@/types/raster";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
 import { DEFAULT_BACKGROUND } from "@/types/layer";
@@ -46,8 +61,6 @@ import { defaultFitPose, screenToCanvas } from "@/lib/layers/layerSpace";
 import { makePose } from "@/lib/geometry/pose";
 import type { TransparencyState } from "@/hooks/useTransparency";
 import BrushCursor from "./BrushCursor";
-
-import { matApply, matInvert } from "@/lib/geometry/mat2d";
 
 export type CanvasView = {
   x: number;
@@ -218,8 +231,6 @@ const commit = useCallback((next: Frame) => {
 }, []);
 
 
-
-
   /* ---------- Layer targets ---------- */
 
   /** The permanent base layer. Always present; see types/layer.ts. */
@@ -264,6 +275,257 @@ const commit = useCallback((next: Frame) => {
     [frame.layers]
   );
 
+  /* ================================================================ */
+  /*  Paint tools — wired to the lib/raster engine                     */
+  /*                                                                   */
+  /*  All tools edit the BASE LAYER's own pixels (layer-local space),   */
+  /*  so results survive move/zoom/stabilize, show on any background,   */
+  /*  and are included in the export. One stroke = one undo step.       */
+  /* ================================================================ */
+
+  type PaintTool = "none" | "brush" | "eraser" | "fill" | "picker";
+  const [paintTool, setPaintTool] = useState<PaintTool>("none");
+  const [paintColor, setPaintColor] = useState("#000000");
+  /** Brush radius in CANVAS px, so it matches the on-screen cursor. */
+  const [brushSize, setBrushSize] = useState(8);
+
+  /** The panel's "Eraser brush" switch still works: it maps to the eraser tool. */
+  const activeTool: PaintTool =
+    paintTool !== "none"
+      ? paintTool
+      : transparency.enabled && transparency.tool === "brush"
+        ? "eraser"
+        : "none";
+
+  const surfaceRef = useRef<RasterSurface | null>(null);
+  const surfaceSrc = useRef<string | null>(null);
+  const strokeRef = useRef<BrushStroke | EraserStroke | null>(null);
+  const previewRaf = useRef(0);
+  const scratchRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Keep an editable surface of the base bitmap ready while a tool is active.
+  useEffect(() => {
+    if (activeTool === "none" || activeTool === "picker") return;
+    if (!base?.image || surfaceSrc.current === base.image) return;
+    let cancelled = false;
+    const src = base.image;
+    RasterSurface.fromLayer(base)
+      .then((s) => {
+        if (cancelled) return;
+        surfaceRef.current = s;
+        surfaceSrc.current = src;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTool, base]);
+
+  /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
+  const toLocal = useCallback((cx: number, cy: number) => {
+    const m = baseLayerMatrix(editRef.current);
+    const inv = m ? matInvert(m) : null;
+    return inv ? matApply(inv, { x: cx, y: cy }) : null;
+  }, []);
+
+  const surfaceReady = () =>
+    !!surfaceRef.current && !!base && surfaceSrc.current === base.image;
+
+  /**
+   * Live preview while a stroke is in progress: repaint the composite with the
+   * base layer hidden, then draw the working surface through the layer matrix.
+   */
+  const paintPreview = useCallback(() => {
+    previewRaf.current = 0;
+    const canvas = baseCanvasRef.current;
+    const surface = surfaceRef.current;
+    const stroke = strokeRef.current;
+    if (!canvas || !surface || !stroke || !base) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    stroke.previewInto();
+
+    let scratch = scratchRef.current;
+    if (!scratch) {
+      scratch = document.createElement("canvas");
+      scratchRef.current = scratch;
+    }
+    if (scratch.width !== surface.width) scratch.width = surface.width;
+    if (scratch.height !== surface.height) scratch.height = surface.height;
+    const sctx = scratch.getContext("2d");
+    if (!sctx) return;
+    const { data } = surface.toImageData();
+    const px = new Uint8ClampedArray(new ArrayBuffer(data.length));
+    px.set(data);
+    sctx.putImageData(new ImageData(px, surface.width, surface.height), 0, 0);
+
+    const f = editRef.current;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    drawFrameLayers(
+      ctx,
+      {
+        ...f,
+        layers: f.layers.map((l) => (l.id === base.id ? { ...l, visible: false } : l)),
+      },
+      CANVAS_SIZE,
+      { background, resolve: domResolver(), checkerboard: true }
+    );
+
+    const m = baseLayerMatrix(f);
+    if (!m) return;
+    ctx.save();
+    ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(scratch, 0, 0);
+    ctx.restore();
+  }, [base, background]);
+
+  const schedulePreview = useCallback(() => {
+    if (!previewRaf.current) {
+      previewRaf.current = requestAnimationFrame(paintPreview);
+    }
+  }, [paintPreview]);
+
+  useEffect(
+    () => () => {
+      if (previewRaf.current) cancelAnimationFrame(previewRaf.current);
+    },
+    []
+  );
+
+  /** Write the surface back into the base layer. */
+  const commitSurface = useCallback(() => {
+    const surface = surfaceRef.current;
+    if (!surface || !base) return;
+    const out = surface.commit();
+    if (!out) return;
+    surfaceSrc.current = out.image;
+    const f = editRef.current;
+    commit({
+      ...f,
+      layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: out.image } : l)),
+      flattenKey: null,
+    });
+  }, [base, commit]);
+
+  const pointSample = (e: React.PointerEvent, local: { x: number; y: number }) => ({
+    x: local.x,
+    y: local.y,
+    pressure: normalizePressure(e.pressure, e.pointerType === "pen"),
+    tilt: 0,
+    twist: 0,
+    time: e.timeStamp,
+  });
+
+  /** Returns true when a paint tool consumed the event. */
+  const paintDown = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
+    if (activeTool === "none" || isPlaying) return false;
+    const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
+    const p = screenToCanvas({ x: e.clientX, y: e.clientY }, rect, view);
+
+    if (activeTool === "picker") {
+      const ctx = baseCanvasRef.current?.getContext("2d");
+      if (ctx) {
+        const d = ctx.getImageData(
+          Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(p.x))),
+          Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(p.y))),
+          1,
+          1
+        ).data;
+        if (d[3] > 0) {
+          setPaintColor(toHex({ r: d[0] / 255, g: d[1] / 255, b: d[2] / 255, a: 1 }));
+          setPaintTool("brush");
+        }
+      }
+      return true;
+    }
+
+    if (!surfaceReady()) return true;
+    const local = toLocal(p.x, p.y);
+    if (!local || !base) return true;
+    const surface = surfaceRef.current!;
+    const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
+
+    if (activeTool === "fill") {
+      onHistoryCommit?.();
+      const res = floodFill(surface, {
+        seed: local,
+        color,
+        opacity: 1,
+        blend: "normal",
+        tolerance: 0.15,
+        contiguous: true,
+        connectivity: 4,
+        grow: 0,
+        feather: 0,
+      } as FloodFillSettings);
+      if (res.pixelsFilled > 0) commitSurface();
+      return true;
+    }
+
+    // brush / eraser
+    onHistoryCommit?.();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const radius = brushSize / Math.max(1e-6, Math.abs(base.pose.scale.x));
+    strokeRef.current =
+      activeTool === "eraser"
+        ? new EraserStroke(surface, { ...DEFAULT_ERASER, radius })
+        : new BrushStroke(surface, { ...DEFAULT_BRUSH, radius, color });
+    strokeRef.current.addSample(pointSample(e, local));
+    schedulePreview();
+    return true;
+  };
+
+  const paintMove = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
+    const stroke = strokeRef.current;
+    if (!stroke) return false;
+    const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
+    const p = screenToCanvas({ x: e.clientX, y: e.clientY }, rect, view);
+    const local = toLocal(p.x, p.y);
+    if (local) {
+      stroke.addSample(pointSample(e, local));
+      schedulePreview();
+    }
+    return true;
+  };
+
+  const paintUp = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
+    const stroke = strokeRef.current;
+    if (!stroke) return activeTool !== "none";
+    strokeRef.current = null;
+    if (previewRaf.current) {
+      cancelAnimationFrame(previewRaf.current);
+      previewRaf.current = 0;
+    }
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    const region = stroke.end();
+    if (region) commitSurface();
+    else setDecodeGeneration((g) => g + 1); // nothing drawn: repaint normally
+    return true;
+  };
+
+  // Shortcuts: B brush, E eraser, G fill, I picker, Esc puts the tool away.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      const map: Record<string, PaintTool> = { b: "brush", e: "eraser", g: "fill", i: "picker" };
+      if (map[k]) {
+        setPaintTool((cur) => (cur === map[k] ? "none" : map[k]));
+      } else if (e.key === "Escape" && !strokeRef.current) {
+        setPaintTool("none");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   /** Native bitmap dimensions of the current frame's base layer. */
   const nativeSizeRef = useRef({
     w: CANVAS_SIZE,
@@ -304,92 +566,10 @@ const commit = useCallback((next: Frame) => {
     };
   }, [transformsLocked, view.rotation, view.x, view.y, hasPixels]);
 
-    useEffect(() => {
+  useEffect(() => {
     onSelectionActiveChange?.(selectionActive);
   }, [selectionActive, onSelectionActiveChange]);
 
-  
-  
-    /* ---------- Eraser: edits the base layer's own pixels ---------- */
-  const ERASER_RADIUS = 16; // canvas px, matches BrushCursor
-  const eraseSurface = useRef<HTMLCanvasElement | null>(null);
-  const eraseSource = useRef<string | null>(null);
-  const eraseDirty = useRef(false);
-
-  // Keep an editable copy of the base bitmap ready while the eraser is on.
-  useEffect(() => {
-    if (!transparency.enabled || !base?.image) return;
-    if (eraseSource.current === base.image) return;
-    let cancelled = false;
-    const src = base.image;
-    loadBitmap(src)
-      .then((img) => {
-        if (cancelled) return;
-        const c = document.createElement("canvas");
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
-        c.getContext("2d")?.drawImage(img, 0, 0);
-        eraseSurface.current = c;
-        eraseSource.current = src;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [transparency.enabled, base?.image]);
-
-  const eraseCircle = useCallback(
-    (cx: number, cy: number) => {
-      if (!transparency.enabled || transparency.tool !== "brush") return;
-      const surface = eraseSurface.current;
-      if (!surface || !base || eraseSource.current !== base.image) return;
-
-      // Canvas point → pixel of the artwork (includes position, zoom, rotation, stabilize).
-      const m = baseLayerMatrix(editRef.current);
-      const inv = m ? matInvert(m) : null;
-      if (!inv) return;
-      const local = matApply(inv, { x: cx, y: cy });
-      const r = ERASER_RADIUS / Math.max(1e-6, Math.abs(base.pose.scale.x));
-
-      const ctx = surface.getContext("2d");
-      if (!ctx) return;
-      ctx.save();
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.beginPath();
-      ctx.arc(local.x, local.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      // Instant feedback on screen while dragging; the real result lands on release.
-      const display = baseCanvasRef.current?.getContext("2d");
-      if (display) {
-        display.save();
-        display.globalCompositeOperation = "destination-out";
-        display.beginPath();
-        display.arc(cx, cy, ERASER_RADIUS, 0, Math.PI * 2);
-        display.fill();
-        display.restore();
-      }
-      eraseDirty.current = true;
-    },
-    [transparency.enabled, transparency.tool, base]
-  );
-
-  const finishErase = useCallback(() => {
-    const surface = eraseSurface.current;
-    if (!eraseDirty.current || !surface || !base) return;
-    eraseDirty.current = false;
-    const url = surface.toDataURL("image/png");
-    eraseSource.current = url;
-    const f = editRef.current;
-    commit({
-      ...f,
-      layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: url } : l)),
-      flattenKey: null,
-    });
-  }, [base, commit]);
-  
-  
   /**
    * Baking a selection flattens the transform into the bitmap, so the lasso is
    * only offered when the bitmap on screen is already 1:1 with the frame.
@@ -1265,11 +1445,11 @@ const handleCanvasPointerUp = (
   !isPlaying &&
   !lassoMode &&
   !selectionActive &&
-  !(transparency.enabled && transparency.tool === "brush") &&
+  activeTool === "none" &&
   editor.tool !== "crop" &&
   (editor.selection.ids.length > 0 || editor.tool === "straighten");
 
-  const cursorClass = lassoMode
+  const cursorClass = lassoMode || activeTool !== "none"
     ? "cursor-crosshair"
     : editor.tool === "crop" || editor.tool === "straighten"
       ? "cursor-crosshair"
@@ -1337,20 +1517,7 @@ onPointerCancel={(e) => {
   className="absolute inset-0 h-full w-full"
   style={{ imageRendering: "pixelated" }}
   onPointerDown={(e) => {
-    if (transparency.enabled && transparency.tool === "brush") {
-      const rect = canvasContainerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const p = screenToCanvas(
-        { x: e.clientX, y: e.clientY },
-        rect,
-        view
-      );
-      onHistoryCommit?.();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      eraseCircle(p.x, p.y);
-      setIsDrawing(true);
-      return;
-    }
+    if (paintDown(e)) return;
 
     if (lassoMode) {
       startLasso(e);
@@ -1362,23 +1529,13 @@ onPointerCancel={(e) => {
   }}
   onPointerMove={(e) => {
     setBrushPos(
-    screenToCanvas(
-      { x: e.clientX, y: e.clientY },
-      canvasContainerRef.current?.getBoundingClientRect() ?? null,
-      view
-    )
-  );
-    if (transparency.enabled && isDrawing && e.buttons === 1) {
-      const rect = canvasContainerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const p = screenToCanvas(
+      screenToCanvas(
         { x: e.clientX, y: e.clientY },
-        rect,
+        canvasContainerRef.current?.getBoundingClientRect() ?? null,
         view
-      );
-      eraseCircle(p.x, p.y);
-      return;
-    }
+      )
+    );
+    if (paintMove(e)) return;
 
     if (lassoMode) {
       drawLasso(e);
@@ -1387,26 +1544,17 @@ onPointerCancel={(e) => {
 
     editor.onPointerMove(e);
     handleCanvasPointerMove(e);
-    
   }}
-
   onPointerLeave={() => setBrushPos(null)}
   onPointerUp={(e) => {
-  if (transparency.enabled) {
-    setIsDrawing(false);
-    finishErase();
+    if (paintUp(e)) return;
 
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-    return;
-  }
-
-  endLasso(e);
-  editor.onPointerUp(e);
-  handleCanvasPointerUp(e);
-}}
+    endLasso(e);
+    editor.onPointerUp(e);
+    handleCanvasPointerUp(e);
+  }}
   onPointerCancel={(e) => {
+    if (paintUp(e)) return;
     endLasso(e);
     editor.onPointerUp(e);
     handleCanvasPointerUp(e);
@@ -1481,9 +1629,9 @@ onPointerCancel={(e) => {
             />
             <BrushCursor
               position={brushPos}
-              radius={16}
-              erasing
-              visible={transparency.enabled && transparency.tool === "brush"}
+              radius={brushSize}
+              erasing={activeTool === "eraser"}
+              visible={activeTool === "brush" || activeTool === "eraser"}
             />
           </div>
 
@@ -1538,6 +1686,60 @@ onPointerCancel={(e) => {
             />
             <circle cx="256" cy="256" r="4" fill="#00E5FF" />
           </svg>
+        )}
+
+        {/* ---------- Paint tools ---------- */}
+        <div className="absolute left-3 top-3 z-50 flex flex-col gap-2 rounded-xl bg-black/60 p-1.5">
+          {(
+            [
+              ["brush", Brush, "Brush (B)"],
+              ["eraser", Eraser, "Eraser (E)"],
+              ["fill", PaintBucket, "Fill (G)"],
+              ["picker", Pipette, "Pick colour (I)"],
+            ] as const
+          ).map(([id, Icon, label]) => (
+            <button
+              key={id}
+              disabled={isPlaying || !hasPixels}
+              onClick={() => setPaintTool(paintTool === id ? "none" : id)}
+              title={label}
+              aria-label={label}
+              className={`flex h-9 w-9 items-center justify-center rounded-lg text-white transition disabled:opacity-30 ${
+                activeTool === id ? "bg-indigo-600" : "hover:bg-zinc-700"
+              }`}
+            >
+              <Icon size={17} />
+            </button>
+          ))}
+
+          <label
+            title="Paint colour"
+            className="relative mx-auto h-7 w-7 cursor-pointer overflow-hidden rounded-full ring-2 ring-white/30"
+            style={{ background: paintColor }}
+          >
+            <input
+              type="color"
+              value={paintColor}
+              onChange={(e) => setPaintColor(e.target.value)}
+              className="absolute inset-0 cursor-pointer opacity-0"
+              aria-label="Paint colour"
+            />
+          </label>
+        </div>
+
+        {(activeTool === "brush" || activeTool === "eraser") && (
+          <div className="absolute left-16 top-3 z-50 flex items-center gap-2 rounded-xl bg-black/70 px-3 py-2 text-xs text-white">
+            <span className="text-zinc-300">Size</span>
+            <input
+              type="range"
+              min={1}
+              max={64}
+              value={brushSize}
+              onChange={(e) => setBrushSize(Number(e.target.value))}
+              className="w-28 accent-indigo-500"
+            />
+            <span className="w-6 text-right tabular-nums">{brushSize}</span>
+          </div>
         )}
 
         <div className="absolute right-3 top-3 z-50 flex flex-col gap-2">
