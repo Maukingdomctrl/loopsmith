@@ -54,6 +54,7 @@ import { loadHistory, saveHistory, clearHistory } from "@/lib/history";
 import type { Snapshot } from "@/types/history";
 import { layerReducer, type LayerAction } from "@/lib/layers/editor";
 import { BLANK_LAYER_SIZE } from "@/lib/layers/constants";
+import { applyMaskToPixels } from "@/lib/layers/maskOps";
 import {
   createBlankFrame,
   duplicateFrame,
@@ -683,6 +684,11 @@ const frames = activeProject?.frames.length
 
       const key = e.key.toLowerCase();
 
+      if (key === "i" && !e.shiftKey) {
+        if (invertMaskShortcut.current()) e.preventDefault();
+        return;
+      }
+
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         if (!selectionActive) undo();
@@ -1015,6 +1021,54 @@ const frames = activeProject?.frames.length
     else updateProject(apply);
   };
 
+  /** Apply Mask: bake the mask into the layer's pixels (every linked copy,
+   *  each with its own mask) as one undo step. */
+  const applyingMask = useRef(false);
+  const applyLayerMask = async (id: string) => {
+    const layer = editFrame.layers.find((l) => l.id === id);
+    if (!layer?.mask || layer.adjust || applyingMask.current) return;
+    const project = projectsRef.current.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    applyingMask.current = true;
+    try {
+      const targets = project.frames
+        .map((f) => ({
+          frameId: f.id,
+          twin: layer.linkId
+            ? f.layers.find((l) => l.linkId === layer.linkId)
+            : f.id === editFrame.id ? f.layers.find((l) => l.id === id) : undefined,
+        }))
+        .filter((t) => t.twin?.mask);
+      const baked = new Map<string, { id: string; image: string }>();
+      for (const t of targets) {
+        const image = await applyMaskToPixels(t.twin!);
+        if (!image) return; // a decode failed: change nothing
+        baked.set(t.frameId, { id: t.twin!.id, image });
+      }
+      // Decode before swapping in, so the canvas never shows the layer blank.
+      await Promise.all([...baked.values()].map((b) => loadBitmap(b.image).catch(() => null)));
+      setEditMask(false);
+      updateProject((p) => ({
+        ...p,
+        frames: p.frames.map((f) => {
+          const b = baked.get(f.id);
+          return b ? layerReducer(f, { type: "layer/maskApplied", id: b.id, image: b.image }) : f;
+        }),
+      }));
+    } finally {
+      applyingMask.current = false;
+    }
+  };
+
+  /** Ctrl+I: invert the targeted mask. */
+  const invertMaskShortcut = useRef<() => boolean>(() => false);
+  invertMaskShortcut.current = () => {
+    const l = editFrame.layers.find((x) => x.id === editor.primary?.id);
+    if (!editMask || !l?.mask || l.locked || isPlaying || selectionActive) return false;
+    dispatchLayerPanel({ type: "layer/maskSet", id: l.id, patch: { inverted: !l.mask.inverted } });
+    return true;
+  };
+
   const handleImport = (file: File) => {
   setIsPlaying(false);
 
@@ -1235,6 +1289,7 @@ const deleteProject = useCallback(
             onAddAdjustment={addAdjustmentLayer}
             editMask={editMask}
             onEditMaskChange={setEditMask}
+            onApplyMask={applyLayerMask}
             onBeginEdit={handleHistoryCommit}
           />
         )}

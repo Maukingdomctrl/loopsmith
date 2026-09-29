@@ -101,6 +101,8 @@ export type LayerAction =
   | { type: "layer/maskAdd"; id: string; hideAll?: boolean }
   | { type: "layer/maskSet"; id: string; patch: Partial<Pick<LayerMask, "inverted" | "enabled">> }
   | { type: "layer/maskDelete"; id: string }
+  /** Apply Mask: `image` is the layer's pixels with the mask baked in. */
+  | { type: "layer/maskApplied"; id: string; image: string }
   | { type: "layer/setImage"; id: string; image: string; size: { w: number; h: number } }
   | { type: "layer/sizeKnown"; id: string; width: number; height: number }
   | { type: "layer/setActive"; id: string }
@@ -224,6 +226,9 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
       break;
     }
     case "layer/maskDelete": next = updateLayer(layers, action.id, { mask: undefined }); break;
+    case "layer/maskApplied":
+      next = updateLayer(layers, action.id, { image: action.image, strokes: [], mask: undefined });
+      break;
 
     case "layer/setImage": {
   const existing = findLayer(layers, action.id);
