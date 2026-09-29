@@ -350,6 +350,8 @@ const commit = useCallback((next: Frame) => {
 
   const brushNow = brushPrefs[brushId];
   const brushSpecNow = brushSpec(brushId);
+  /** Hard Linework records stroke physics (drawn fresh at every zoom), not pixels. */
+  const brushIsVector = brushSpecNow.model === "hard";
   const brushPanelVisible = brushPanelOpen && activeTool === "brush";
   /** The radius the cursor and the size bar show: the brush's own, or the eraser's. */
   const brushPanelVisibleRef = useRef(false);
@@ -360,7 +362,11 @@ const commit = useCallback((next: Frame) => {
   const surfaceRef = useRef<RasterSurface | null>(null);
   const surfaceSrc = useRef<string | null>(null);
   /** The pencil / eraser stroke being drawn: its samples grow in place until pen-up. */
-  const liveRef = useRef<{ stroke: PencilStroke & { pts: number[] }; t0: number } | null>(null);
+  const liveRef = useRef<{
+    stroke: PencilStroke & { pts: number[] };
+    t0: number;
+    mousePressure: number;
+  } | null>(null);
   /** The material brush stroke being drawn on the pixel surface. */
   const strokeRef = useRef<MaterialStroke | null>(null);
   const scratchRef = useRef<HTMLCanvasElement | null>(null);
@@ -398,8 +404,9 @@ const commit = useCallback((next: Frame) => {
       }
     }
 
-    // Fill and the material brushes work on pixels.
-    if (activeTool !== "fill" && activeTool !== "brush") return;
+    // Fill and the material brushes work on pixels. Hard Linework is recorded
+    // as strokes, like the pencil, so it stays sharp at every zoom.
+    if (activeTool !== "fill" && (activeTool !== "brush" || brushIsVector)) return;
 
     if (base.strokes?.length) {
       let cancelled = false;
@@ -450,7 +457,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, base, commit, previousFrame]);
+  }, [activeTool, base, commit, previousFrame, brushIsVector]);
 
   /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
   const toLocal = useCallback((cx: number, cy: number) => {
@@ -608,7 +615,11 @@ const commit = useCallback((next: Frame) => {
    * full device precision, tilt and lean direction (converted into layer
    * space), barrel twist and time.
    */
-  const pencilSample = (ev: PointerEvent, t0: number): number[] | null => {
+  const pencilSample = (
+    ev: PointerEvent,
+    t0: number,
+    mousePressure = MOUSE_PRESSURE
+  ): number[] | null => {
     const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
     const p = screenToCanvas({ x: ev.clientX, y: ev.clientY }, rect, view);
     const m = baseLayerMatrix(editRef.current);
@@ -621,7 +632,7 @@ const commit = useCallback((next: Frame) => {
       ? Math.min(1, Math.max(0, ev.pressure))
       : ev.pointerType === "touch" && ev.pressure > 0 && ev.pressure !== 0.5
         ? Math.min(1, ev.pressure)
-        : MOUSE_PRESSURE;
+        : mousePressure;
 
     let tilt = 0;
     let azimuth = 0;
@@ -701,7 +712,7 @@ const commit = useCallback((next: Frame) => {
     onHistoryCommit?.();
     e.currentTarget.setPointerCapture(e.pointerId);
     const scale = Math.max(1e-6, Math.abs(base.pose.scale.x));
-    if (activeTool === "brush") {
+    if (activeTool === "brush" && !brushIsVector) {
       if (!surfaceReady()) return true;
       strokeRef.current = new MaterialStroke(surfaceRef.current!, {
         brush: brushSpecNow,
@@ -719,22 +730,28 @@ const commit = useCallback((next: Frame) => {
       schedulePreview();
       return true;
     }
+    const inkStroke = activeTool === "brush";
+    const inkMaterial = brushSpecNow.materials?.find((m) => m.id === brushNow.material);
+    const mousePressure = inkStroke
+      ? (inkMaterial?.mouse ?? brushSpecNow.mouse).base
+      : MOUSE_PRESSURE;
     const stroke: PencilStroke & { pts: number[] } = {
       id: createStrokeId(),
-      kind: activeTool === "eraser" ? "erase" : "graphite",
+      kind: inkStroke ? "ink" : activeTool === "eraser" ? "erase" : "graphite",
       color: paintColor,
-      size: brushSize / scale,
+      size: (inkStroke ? brushNow.size : brushSize) / scale,
       seed: base.strokes?.[0]?.seed ?? seedFromString(base.id),
+      ...(inkStroke ? { material: brushNow.material ?? "pen", opacity: brushNow.intensity } : {}),
       pts: [],
     };
     markLiveStroke(stroke);
     const t0 = e.timeStamp;
-    const first = pencilSample(e.nativeEvent, t0);
+    const first = pencilSample(e.nativeEvent, t0, mousePressure);
     if (first) {
       stroke.pts.push(...first);
       setTipPressure(first[2]);
     }
-    liveRef.current = { stroke, t0 };
+    liveRef.current = { stroke, t0, mousePressure };
     schedulePreview();
     return true;
   };
@@ -765,7 +782,7 @@ const commit = useCallback((next: Frame) => {
     if (!live) return false;
     const pts = live.stroke.pts;
     for (const ev of events) {
-      const smp = pencilSample(ev, live.t0);
+      const smp = pencilSample(ev, live.t0, live.mousePressure);
       if (!smp) continue;
       const n = pts.length;
       if (n >= 7) {

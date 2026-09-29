@@ -21,7 +21,9 @@ export const P_AZIMUTH = 4; //  direction the pencil leans, radians, layer space
 export const P_TWIST = 5; //    barrel rotation, radians
 export const P_TIME = 6; //     ms since the stroke started
 
-export type PencilStrokeKind = "graphite" | "erase";
+/** "ink" is the Hard Linework brush: a clean line whose width and opacity
+ *  follow its material's pressure curves (lib/raster/brushes/models/hard.ts). */
+export type PencilStrokeKind = "graphite" | "erase" | "ink";
 
 export interface PencilStroke {
   readonly id: string;
@@ -32,6 +34,10 @@ export interface PencilStroke {
   readonly size: number;
   /** Paper seed: every sheet has its own tooth. Copied on duplicate. */
   readonly seed: number;
+  /** Ink only: Hard Linework material ("pen" | "pencil" | "ink"). */
+  readonly material?: string;
+  /** Ink only: the brush's opacity slider, 0..1. */
+  readonly opacity?: number;
   /** Flat samples, PENCIL_STRIDE numbers each. */
   readonly pts: readonly number[];
 }

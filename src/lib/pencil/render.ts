@@ -22,6 +22,10 @@
  *               only touch the peaks; heavy or slow strokes reach the valleys.
  * Within one stroke coverage is the MAX over the ribbon, never a sum, so a
  * stroke does not darken where it overlaps itself.
+ *
+ * Ink strokes (Hard Linework) share the same ribbon and edges, but take width
+ * and opacity from their material's pressure curves, ignore tilt and speed,
+ * and only touch the paper tooth when the material has grain.
  */
 
 import type { Mat2D, Rect } from "@/types/geometry";
@@ -37,6 +41,8 @@ import {
   type PencilStroke,
 } from "./types";
 import { paperTooth } from "./paper";
+import { pressureCurve } from "@/lib/raster/brushes/curves";
+import { MATERIALS as HARD_MATERIALS, grainedInk } from "@/lib/raster/brushes/models/hard";
 
 export interface PixelTarget {
   readonly data: Uint8ClampedArray;
@@ -66,6 +72,19 @@ export const widthFactor = (p: number) =>
 const TILT_STRETCH = 1.6;
 /** Speed (layer px / ms) at which dwell stops adding richness. */
 const SPEED_REF = 0.6;
+
+/** Thinnest ink line, in output px: a feather-light touch stays a hairline. */
+const INK_HAIRLINE = 0.15;
+
+const hardMaterial = (stroke: PencilStroke) =>
+  HARD_MATERIALS[stroke.material ?? "pen"] ?? HARD_MATERIALS.pen;
+
+/** Pressure → fraction of the stroke's full radius. */
+const widthOf = (stroke: PencilStroke) => {
+  if (stroke.kind !== "ink") return widthFactor;
+  const mat = hardMaterial(stroke);
+  return (p: number) => pressureCurve(p, mat.width);
+};
 
 const smoothstep = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -189,6 +208,9 @@ function buildRibbon(stroke: PencilStroke, m: Mat2D): Ribbon {
   const n = strokeSamples(stroke);
   const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
   const erase = stroke.kind === "erase";
+  const ink = stroke.kind === "ink";
+  const mat = hardMaterial(stroke);
+  const wf = widthOf(stroke);
 
   // Samples in output space.
   const X = new Float64Array(n);
@@ -232,17 +254,21 @@ function buildRibbon(stroke: PencilStroke, m: Mat2D): Ribbon {
   const push = (x: number, y: number, p: number, tilt: number, ux: number, uy: number, v: number) => {
     if (out.n === out.x.length) grow();
     const pc = Math.min(1, Math.max(0, p));
-    const tl = Math.min(1, Math.max(0, tilt));
+    const tl = ink ? 0 : Math.min(1, Math.max(0, tilt));
     const slow = Math.exp(-Math.max(0, v) / SPEED_REF);
     const k = out.n++;
     out.x[k] = x;
     out.y[k] = y;
-    out.r[k] = stroke.size * scale * widthFactor(pc);
+    out.r[k] = stroke.size * scale * wf(pc);
+    if (ink) out.r[k] = Math.max(INK_HAIRLINE, out.r[k]);
     out.tilt[k] = tl;
     const ul = Math.hypot(ux, uy) || 1;
     out.ux[k] = ux / ul;
     out.uy[k] = uy / ul;
-    if (erase) {
+    if (ink) {
+      out.dens[k] = Math.min(1, Math.max(0, pressureCurve(pc, mat.opacity))) * (stroke.opacity ?? 1);
+      out.reach[k] = 1;
+    } else if (erase) {
       out.dens[k] = 0.25 + 0.65 * Math.pow(pc, 1.2);
       out.reach[k] = 0.9;
     } else {
@@ -260,7 +286,7 @@ function buildRibbon(stroke: PencilStroke, m: Mat2D): Ribbon {
   for (let i = 0; i < n - 1; i++) {
     const i0 = idx(i - 1), i1 = i, i2 = i + 1, i3 = idx(i + 2);
     const span = Math.hypot(X[i2] - X[i1], Y[i2] - Y[i1]);
-    const rMin = Math.min(stroke.size * scale * widthFactor(P[i1]), stroke.size * scale * widthFactor(P[i2]));
+    const rMin = Math.min(stroke.size * scale * wf(P[i1]), stroke.size * scale * wf(P[i2]));
     const step = Math.max(0.5, Math.min(3, 0.6 * rMin));
     const steps = Math.min(2048, Math.max(1, Math.ceil(span / step)));
 
@@ -355,6 +381,8 @@ export function renderStrokes(
     const cov = new Float32Array(bw * (by1 - by0));
     const tooth = toothMap(stroke.seed, opts.matrix, opts.surfaceW, opts.surfaceH);
     const erase = stroke.kind === "erase";
+    const ink = stroke.kind === "ink";
+    const inkGrain = ink ? hardMaterial(stroke).grain : 0;
     const rib = buildRibbon(stroke, opts.matrix);
 
     const toothAt = (gx: number, gy: number) => {
@@ -409,12 +437,17 @@ export function renderStrokes(
           const t = len2 > 1e-12 ? Math.min(1, Math.max(0, ((cx - ax) * dx + (cy - ay) * dy) / len2)) : 0;
           const thin = fA + (fB - fA) * t;
           const dens = rib.dens[a] + (rib.dens[e] - rib.dens[a]) * t;
-          const reach = rib.reach[a] + (rib.reach[e] - rib.reach[a]) * t;
-          const threshold = 1 - reach;
-          const caught = smoothstep(threshold - 0.1, threshold + 0.1, toothAt(gx, gy));
-          const grain = erase ? 0.65 + 0.35 * caught : 0.06 + 0.94 * caught;
+          let body: number;
+          if (ink) {
+            body = inkGrain > 0 ? grainedInk(dens, toothAt(gx, gy), inkGrain) : dens;
+          } else {
+            const reach = rib.reach[a] + (rib.reach[e] - rib.reach[a]) * t;
+            const threshold = 1 - reach;
+            const caught = smoothstep(threshold - 0.1, threshold + 0.1, toothAt(gx, gy));
+            body = dens * (erase ? 0.65 + 0.35 * caught : 0.06 + 0.94 * caught);
+          }
 
-          const val = smoothstep(-0.5, 0.5, -sdf) * thin * dens * grain;
+          const val = smoothstep(-0.5, 0.5, -sdf) * thin * body;
           const ci = (gy - by0) * bw + (gx - bx0);
           if (val > cov[ci]) cov[ci] = val;
         }

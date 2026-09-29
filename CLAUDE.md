@@ -27,7 +27,9 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
   compositor (`lib/layers/composite.ts`) renders them analytically at every resolution (view,
   flatten, GIF) over the layer's `image`: spline + signed-distance edges, procedural paper
   (`paper.ts`), no stamps. Renders are cached; views show a stand-in while zooming, then refine.
-- **Brush and fill work on pixels** (`lib/raster`: `RasterSurface`, `MaterialStroke`, `floodFill`, commit via
+- **Hard Linework is stored like the pencil** (an `"ink"` stroke in `layer.strokes`, drawn by `pencil/render.ts`
+  with the material curves from `brushes/models/hard.ts`), so it stays sharp at every zoom.
+- **The other brushes and fill work on pixels** (`lib/raster`: `RasterSurface`, `MaterialStroke`, `floodFill`, commit via
   `surface.commit()`, decoded before it is swapped in so the canvas never blinks). Before brush, fill or the
   lasso touch a layer, its pencil strokes are baked into `image` (`pencil/bake.ts`).
 - **Brushes** (`lib/raster/brushes/`): one `MaterialStroke`, built on the existing `StrokePath`, drives five
