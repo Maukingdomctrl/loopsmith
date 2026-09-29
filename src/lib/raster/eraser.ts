@@ -110,6 +110,7 @@ export function eraseDot(
   const p: StrokePoint = {
     x: point.x, y: point.y, distance: 0,
     tangent: { x: 1, y: 0 }, pressure, tilt: 0, twist: 0, speed: 0,
+    time: 0, azimuth: 0,
   };
   BrushEngine.stampPath(coverage, settings, [p], rng);
   const region = coverage.integerBounds();

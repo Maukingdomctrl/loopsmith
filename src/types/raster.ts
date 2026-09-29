@@ -40,6 +40,8 @@ export interface StrokeSample {
   readonly twist: number;
   /** ms, monotonic. */
   readonly time: number;
+  /** Direction the stylus leans toward, radians. Only meaningful when `tilt` > 0. */
+  readonly azimuth?: number;
 }
 
 /** A point on the resampled, arc-length-parameterized stroke path. */
@@ -56,6 +58,10 @@ export interface StrokePoint {
   readonly twist: number;
   /** Local px per ms at this point. 0 for the first point. */
   readonly speed: number;
+  /** ms, interpolated along the path like every other dynamic. */
+  readonly time: number;
+  /** Direction the stylus leans toward, radians. */
+  readonly azimuth: number;
 }
 
 /* ========== brush ========== */

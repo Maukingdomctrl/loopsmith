@@ -23,8 +23,12 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 - Frames hold layers; the **base layer** holds the artwork. Pose = position/scale/rotation (see `lib/layers/layerSpace.ts`).
 - Canvas → layer pixel: invert `baseLayerMatrix(frame)` from `lib/frameTransform.ts` (includes stabilization offset).
 - **All paint tools edit the base layer's own pixels**, never a screen-space mask. They use the
-  `lib/raster` engine (`RasterSurface`, `BrushStroke`, `EraserStroke`, `floodFill`) and commit via
+  `lib/raster` engine (`RasterSurface`, `MaterialStroke`, `EraserStroke`, `floodFill`) and commit via
   `surface.commit()` → layer `image` + `flattenKey: null`. One stroke = one undo step (`onHistoryCommit`).
+- **Brushes** (`lib/raster/brushes/`): one `MaterialStroke`, built on the existing `StrokePath`, drives five
+  materials — soft round / soft rectangle, hard line, water, texture — picked in `components/BrushPanel.tsx`.
+  A new brush is a `BrushSpec` in `presets.ts` plus a `BrushModel` in `models/`. Pressure only ever goes
+  through the continuous curves in `curves.ts` (no thresholds); texture and noise are deterministic.
 - Background is document state (`CanvasBackground`); checkerboard is view-only and never exported.
 - Page layout is a fixed flex frame (Toolbar / sidebars / Canvas / Timeline). Nothing should shift size.
 
