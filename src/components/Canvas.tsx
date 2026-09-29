@@ -234,6 +234,9 @@ export default function Canvas({
   const [selectionActive, setSelectionActive] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [brushPos, setBrushPos] = useState<{ x: number; y: number } | null>(null);
+  /** Moved directly while a stroke is drawn: a React render per pen sample
+   *  lags behind the pen, most at the start of a stroke. */
+  const cursorGroupRef = useRef<SVGGElement>(null);
 
   const [selectionCanvas, setSelectionCanvas] =
     useState<HTMLCanvasElement | null>(null);
@@ -1973,13 +1976,16 @@ onPointerCancel={(e) => {
     handleCanvasPointerDown(e);
   }}
   onPointerMove={(e) => {
-    setBrushPos(
-      screenToCanvas(
-        { x: e.clientX, y: e.clientY },
-        canvasContainerRef.current?.getBoundingClientRect() ?? null,
-        view
-      )
+    const pos = screenToCanvas(
+      { x: e.clientX, y: e.clientY },
+      canvasContainerRef.current?.getBoundingClientRect() ?? null,
+      view
     );
+    if ((liveRef.current || strokeRef.current) && cursorGroupRef.current) {
+      cursorGroupRef.current.setAttribute("transform", `translate(${pos.x} ${pos.y})`);
+    } else {
+      setBrushPos(pos);
+    }
     if (paintMove(e)) return;
 
     if (lassoMode) {
@@ -1992,6 +1998,13 @@ onPointerCancel={(e) => {
   }}
   onPointerLeave={() => setBrushPos(null)}
   onPointerUp={(e) => {
+    setBrushPos(
+      screenToCanvas(
+        { x: e.clientX, y: e.clientY },
+        canvasContainerRef.current?.getBoundingClientRect() ?? null,
+        view
+      )
+    );
     if (paintUp(e)) return;
 
     endLasso(e);
@@ -2099,6 +2112,7 @@ onPointerCancel={(e) => {
               }
               color={paintColor}
               erasing={activeTool === "eraser"}
+              positionRef={cursorGroupRef}
               visible={activeTool === "pencil" || activeTool === "brush" || activeTool === "eraser"}
             />
           </div>
