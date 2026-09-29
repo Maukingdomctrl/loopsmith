@@ -54,7 +54,7 @@ import {
 } from "@/lib/pencil/types";
 import { widthFactor } from "@/lib/pencil/render";
 import { bakeLayerStrokes } from "@/lib/pencil/bake";
-import { markLiveStroke, onStrokeRefine } from "@/lib/layers/composite";
+import { markLiveStroke, onStrokeRefine, type BitmapResolver } from "@/lib/layers/composite";
 import type { FloodFillSettings } from "@/types/raster";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
@@ -66,7 +66,7 @@ import {
   preloadFrameBitmaps,
 } from "@/lib/layers/flatten";
 import { baseLayer, findLayer } from "@/lib/layers/layerOps";
-import { defaultFitPose, screenToCanvas } from "@/lib/layers/layerSpace";
+import { defaultFitPose, layerMatrix, screenToCanvas } from "@/lib/layers/layerSpace";
 import { makePose } from "@/lib/geometry/pose";
 import type { TransparencyState } from "@/hooks/useTransparency";
 import BrushCursor from "./BrushCursor";
@@ -270,6 +270,22 @@ const commit = useCallback((next: Frame) => {
   /** The permanent base layer. Always present; see types/layer.ts. */
   const base = useMemo(() => baseLayer(editFrame.layers), [editFrame.layers]);
 
+  /** The layer the paint tools draw on: the selected layer, else the base. */
+  const paintLayer = useMemo(
+    () => findLayer(editFrame.layers, editor.primary?.id ?? null) ?? base,
+    [editFrame.layers, editor.primary?.id, base]
+  );
+  const paintIdRef = useRef<string | null>(null);
+  paintIdRef.current = paintLayer?.id ?? null;
+
+  /** Canvas → layer matrix of the painted layer. The base keeps its
+   *  stabilization offset (baseLayerMatrix); other layers use their pose. */
+  const paintMatrix = useCallback((f: Frame) => {
+    const l = findLayer(f.layers, paintIdRef.current);
+    if (!l) return null;
+    return l.kind === "base" ? baseLayerMatrix(f) : layerMatrix(l);
+  }, []);
+
   /**
    * What the legacy zoom / reset / nudge controls act on.
    *
@@ -312,7 +328,7 @@ const commit = useCallback((next: Frame) => {
   /* ================================================================ */
   /*  Paint tools                                                       */
   /*                                                                   */
-  /*  Pencil and eraser record STROKE PHYSICS on the base layer         */
+  /*  Pencil and eraser record STROKE PHYSICS on the selected layer            */
   /*  (lib/pencil); the compositor renders them analytically at every   */
   /*  resolution. Fill works on pixels (lib/raster) and folds strokes   */
   /*  into the bitmap first. One stroke = one undo step.                */
@@ -363,21 +379,23 @@ const commit = useCallback((next: Frame) => {
   const scratchRef = useRef<HTMLCanvasElement | null>(null);
   /** A committed bitmap still decoding; the surface already holds it. */
   const pendingImageRef = useRef<string | null>(null);
+  /** Which layer `surfaceRef` holds pixels for. */
+  const surfaceLayerRef = useRef<string | null>(null);
   const previewRaf = useRef(0);
 
-  // Tools need a sheet: an empty base layer becomes a 512×512 page. Fill needs
+  // Tools need a sheet: an empty layer becomes a 512×512 page. Fill needs
   // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
-    if (!base) return;
+    if (!paintLayer) return;
 
-    if (!base.image && !base.strokes?.length) {
-      if (base.size.w !== BLANK_SIZE || base.size.h !== BLANK_SIZE) {
+    if (!paintLayer.image && !paintLayer.strokes?.length) {
+      if (paintLayer.size.w !== BLANK_SIZE || paintLayer.size.h !== BLANK_SIZE) {
         const f = editRef.current;
         commit({
           ...f,
           layers: f.layers.map((l) =>
-            l.id === base.id
+            l.id === paintLayer.id
               ? {
                   ...l,
                   size: { w: BLANK_SIZE, h: BLANK_SIZE },
@@ -393,9 +411,16 @@ const commit = useCallback((next: Frame) => {
     // Fill and the material brushes work on pixels.
     if (activeTool !== "fill" && activeTool !== "brush") return;
 
-    if (base.strokes?.length) {
+    // A different layer: its pixels are not the surface we hold.
+    if (surfaceLayerRef.current !== paintLayer.id) {
+      surfaceLayerRef.current = paintLayer.id;
+      surfaceRef.current = null;
+      surfaceSrc.current = null;
+    }
+
+    if (paintLayer.strokes?.length) {
       let cancelled = false;
-      bakeLayerStrokes(base).then((image) => {
+      bakeLayerStrokes(paintLayer).then((image) => {
         if (cancelled || !image) return;
         loadBitmap(image)
           .catch(() => null)
@@ -405,7 +430,7 @@ const commit = useCallback((next: Frame) => {
             commit({
               ...f,
               layers: f.layers.map((l) =>
-                l.id === base.id ? { ...l, image, strokes: [] } : l
+                l.id === paintLayer.id ? { ...l, image, strokes: [] } : l
               ),
               flattenKey: null,
             });
@@ -417,22 +442,22 @@ const commit = useCallback((next: Frame) => {
     }
 
     // Blank sheet: a transparent surface of the layer's size.
-    if (!base.image) {
+    if (!paintLayer.image) {
       if (surfaceRef.current && surfaceSrc.current === null) return;
       surfaceRef.current = new RasterSurface(
-        Math.max(1, Math.round(base.size.w)),
-        Math.max(1, Math.round(base.size.h))
+        Math.max(1, Math.round(paintLayer.size.w)),
+        Math.max(1, Math.round(paintLayer.size.h))
       );
       surfaceSrc.current = null;
       return;
     }
 
-    if (surfaceSrc.current === base.image) return;
+    if (surfaceSrc.current === paintLayer.image) return;
     // A stroke was just committed and is still decoding: the surface is newer.
     if (surfaceSrc.current && surfaceSrc.current === pendingImageRef.current) return;
     let cancelled = false;
-    const src = base.image;
-    RasterSurface.fromLayer(base)
+    const src = paintLayer.image;
+    RasterSurface.fromLayer(paintLayer)
       .then((s) => {
         if (cancelled) return;
         surfaceRef.current = s;
@@ -442,24 +467,24 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, base, commit]);
+  }, [activeTool, paintLayer, commit]);
 
   /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
   const toLocal = useCallback((cx: number, cy: number) => {
-    const m = baseLayerMatrix(editRef.current);
+    const m = paintMatrix(editRef.current);
     const inv = m ? matInvert(m) : null;
     return inv ? matApply(inv, { x: cx, y: cy }) : null;
   }, []);
 
   const surfaceReady = () =>
     !!surfaceRef.current &&
-    !!base &&
-    !base.strokes?.length &&
-    (surfaceSrc.current === base.image || surfaceSrc.current === pendingImageRef.current);
+    !!paintLayer &&
+    !paintLayer.strokes?.length &&
+    (surfaceSrc.current === paintLayer.image || surfaceSrc.current === pendingImageRef.current);
 
   /**
    * Live preview while a stroke is in progress: the normal composite, with the
-   * live stroke appended to the base layer. Earlier strokes come from the
+   * live stroke appended to the layer being painted. Earlier strokes come from the
    * compositor's cache, so only the live stroke is rendered each frame.
    */
   const paintPreview = useCallback(() => {
@@ -467,14 +492,14 @@ const commit = useCallback((next: Frame) => {
     const canvas = baseCanvasRef.current;
     const live = liveRef.current;
     const stroke = strokeRef.current;
-    if (!canvas || !base || (!live && !stroke)) return;
+    if (!canvas || !paintLayer || (!live && !stroke)) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const f = editRef.current;
 
-    // Material brush: the composite with the base layer hidden, then the
-    // working surface drawn through the layer matrix.
+    // Material brush: the working surface stands in for the layer's pixels, so
+    // the stroke shows in its place in the stack, with its blend and opacity.
     if (stroke) {
       const surface = surfaceRef.current;
       if (!surface) return;
@@ -493,24 +518,25 @@ const commit = useCallback((next: Frame) => {
       px.set(data);
       sctx.putImageData(new ImageData(px, surface.width, surface.height), 0, 0);
 
+      const dom = domResolver();
+      const liveId = paintLayer.id;
+      const resolve: BitmapResolver = (l) =>
+        l.id === liveId
+          ? { layerId: liveId, image: scratch!, width: scratch!.width, height: scratch!.height }
+          : dom(l);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
       drawFrameLayers(
         ctx,
         {
           ...f,
-          layers: f.layers.map((l) => (l.id === base.id ? { ...l, visible: false } : l)),
+          // Any non-null image makes the (maybe blank) layer render; the
+          // resolver hands back the live surface for it.
+          layers: f.layers.map((l) => (l.id === liveId ? { ...l, image: "live" } : l)),
         },
         CANVAS_SIZE,
-        { background, resolve: domResolver(), checkerboard: true }
+        { background, resolve, checkerboard: true }
       );
-      const m = baseLayerMatrix(f);
-      if (!m) return;
-      ctx.save();
-      ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(scratch, 0, 0);
-      ctx.restore();
       return;
     }
     if (!live) return;
@@ -530,13 +556,13 @@ const commit = useCallback((next: Frame) => {
       {
         ...f,
         layers: f.layers.map((l) =>
-          l.id === base.id ? { ...l, strokes: [...(l.strokes ?? []), live.stroke] } : l
+          l.id === paintLayer.id ? { ...l, strokes: [...(l.strokes ?? []), live.stroke] } : l
         ),
       },
       CANVAS_SIZE,
       { background, resolve: domResolver(), checkerboard: true }
     );
-  }, [base, background]);
+  }, [paintLayer, background]);
 
   const schedulePreview = useCallback(() => {
     if (!previewRaf.current) {
@@ -551,10 +577,10 @@ const commit = useCallback((next: Frame) => {
     []
   );
 
-  /** Write the surface back into the base layer. */
+  /** Write the surface back into the layer being painted. */
   const commitSurface = useCallback(() => {
     const surface = surfaceRef.current;
-    if (!surface || !base) return;
+    if (!surface || !paintLayer) return;
     const out = surface.commit();
     if (!out) return;
     surfaceSrc.current = out.image;
@@ -569,11 +595,11 @@ const commit = useCallback((next: Frame) => {
         const f = editRef.current;
         commit({
           ...f,
-          layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: out.image } : l)),
+          layers: f.layers.map((l) => (l.id === paintLayer.id ? { ...l, image: out.image } : l)),
           flattenKey: null,
         });
       });
-  }, [base, commit]);
+  }, [paintLayer, commit]);
 
   /** One pointer sample in base-layer pixels. Takes a React event or a native (coalesced) one. */
   const pointSample = (
@@ -602,7 +628,7 @@ const commit = useCallback((next: Frame) => {
   const pencilSample = (ev: PointerEvent, t0: number): number[] | null => {
     const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
     const p = screenToCanvas({ x: ev.clientX, y: ev.clientY }, rect, view);
-    const m = baseLayerMatrix(editRef.current);
+    const m = paintMatrix(editRef.current);
     const inv = m ? matInvert(m) : null;
     if (!inv) return null;
     const local = matApply(inv, p);
@@ -666,14 +692,14 @@ const commit = useCallback((next: Frame) => {
     }
 
     const local = toLocal(p.x, p.y);
-    if (!local || !base) return true;
+    if (!local || !paintLayer || paintLayer.locked) return true;
 
     if (activeTool === "fill") {
       if (!surfaceReady()) return true;
       const surface = surfaceRef.current!;
       const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
       onHistoryCommit?.();
-      const before = base.alphaLock ? surface.data.slice() : null;
+      const before = paintLayer.alphaLock ? surface.data.slice() : null;
       const res = floodFill(surface, {
         seed: local,
         color,
@@ -691,12 +717,12 @@ const commit = useCallback((next: Frame) => {
     }
 
     // Alpha lock keeps every pixel's alpha, so the eraser has nothing to do.
-    if (activeTool === "eraser" && base.alphaLock) return true;
+    if (activeTool === "eraser" && paintLayer.alphaLock) return true;
 
     // pencil / eraser: record the stroke's physics
     onHistoryCommit?.();
     e.currentTarget.setPointerCapture(e.pointerId);
-    const scale = Math.max(1e-6, Math.abs(base.pose.scale.x));
+    const scale = Math.max(1e-6, Math.abs(paintLayer.pose.scale.x));
     if (activeTool === "brush") {
       if (!surfaceReady()) return true;
       strokeRef.current = new MaterialStroke(surfaceRef.current!, {
@@ -710,7 +736,7 @@ const commit = useCallback((next: Frame) => {
         // a mouse or finger gets the brush's own stand-in
         hasPressure: reportsPressure(e),
         scale,
-        lockAlpha: base.alphaLock,
+        lockAlpha: paintLayer.alphaLock,
       });
       strokeRef.current.addSample(pointSample(e, local));
       schedulePreview();
@@ -721,8 +747,8 @@ const commit = useCallback((next: Frame) => {
       kind: activeTool === "eraser" ? "erase" : "graphite",
       color: paintColor,
       size: brushSize / scale,
-      seed: base.strokes?.[0]?.seed ?? seedFromString(base.id),
-      ...(base.alphaLock && { lockAlpha: true }),
+      seed: paintLayer.strokes?.[0]?.seed ?? seedFromString(paintLayer.id),
+      ...(paintLayer.alphaLock && { lockAlpha: true }),
       pts: [],
     };
     markLiveStroke(stroke);
@@ -803,7 +829,7 @@ const commit = useCallback((next: Frame) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-    if (!base || live.stroke.pts.length === 0) {
+    if (!paintLayer || live.stroke.pts.length === 0) {
       setDecodeGeneration((g) => g + 1);
       return true;
     }
@@ -812,7 +838,7 @@ const commit = useCallback((next: Frame) => {
     commit({
       ...f,
       layers: f.layers.map((l) =>
-        l.id === base.id ? { ...l, strokes: [...(l.strokes ?? []), done] } : l
+        l.id === paintLayer.id ? { ...l, strokes: [...(l.strokes ?? []), done] } : l
       ),
       flattenKey: null,
     });
@@ -2035,7 +2061,7 @@ onPointerCancel={(e) => {
               aspect={activeTool === "brush" ? brushSpecNow.aspect ?? 1 : 1}
               angle={
                 activeTool === "brush" && brushSpecNow.shape === "rect"
-                  ? brushNow.angle + (base?.pose.rotation ?? 0)
+                  ? brushNow.angle + (paintLayer?.pose.rotation ?? 0)
                   : -view.rotation
               }
               color={paintColor}

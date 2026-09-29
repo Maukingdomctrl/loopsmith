@@ -10,12 +10,15 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus } from "lucide-react";
 
 import type { BlendMode, Layer, LayerSelection } from "@/types/layer";
 import { BLEND_LABELS, BLEND_MODES } from "@/types/layer";
 import type { LayerAction } from "@/lib/layers/editor";
 import { MAX_LAYERS_PER_FRAME } from "@/lib/layers/constants";
+
+/** Same sheet size the paint tools give an empty base layer. */
+const BLANK_LAYER_SIZE = 512;
 
 interface Props {
   layers: readonly Layer[];
@@ -72,14 +75,26 @@ export default function LayerPanel({
             {layers.length}/{MAX_LAYERS_PER_FRAME}
           </span>
         </div>
-        <button
-          onClick={onAddImage}
-          disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
-          title="Add layer from image"
-          className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
-        >
-          <Plus size={14} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() =>
+              dispatch({ type: "layer/add", image: null, size: { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE } })
+            }
+            disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
+            title="New blank layer to paint on"
+            className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+          >
+            <Plus size={14} />
+          </button>
+          <button
+            onClick={onAddImage}
+            disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
+            title="Add layer from image"
+            className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+          >
+            <ImagePlus size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
