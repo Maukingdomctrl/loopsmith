@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown, RectangleCircle, Contrast, X } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown, RectangleCircle, Contrast, X, Check } from "lucide-react";
 
 import type { Adjustment, AdjustmentType, BlendMode, ColorBalanceTone, Layer, LayerSelection } from "@/types/layer";
 import { ADJUSTMENT_LABELS, BLEND_LABELS, BLEND_MODES } from "@/types/layer";
@@ -33,13 +33,15 @@ interface Props {
   /** Paint tools target the selected layer's mask. */
   editMask?: boolean;
   onEditMaskChange?: (v: boolean) => void;
+  /** Bake the layer's mask into its pixels and remove it. */
+  onApplyMask?: (id: string) => void;
 }
 
 const ADJUSTMENT_TYPES: readonly AdjustmentType[] = ["brightnessContrast", "hueSaturation", "colorBalance"];
 
 export default function LayerPanel({
   layers, selection, disabled, onSelect, dispatch, onAddImage, onAddBlankAllFrames,
-  onAddAdjustment, onBeginEdit, editMask = false, onEditMaskChange,
+  onAddAdjustment, onBeginEdit, editMask = false, onEditMaskChange, onApplyMask,
 }: Props) {
   const [adjustMenu, setAdjustMenu] = useState(false);
   // Reverse for display only. The index handed back to `moveLayer` is always
@@ -392,7 +394,7 @@ export default function LayerPanel({
                   dispatch({ type: "layer/maskSet", id: primaryLayer.id, patch: { inverted: !primaryLayer.mask!.inverted } })
                 }
                 disabled={disabled || primaryLayer.locked}
-                title="Invert mask"
+                title="Invert mask (Ctrl+I)"
                 className="rounded bg-zinc-800 p-1 hover:bg-zinc-700 disabled:opacity-40"
               ><Contrast size={12} /></button>
               <button
@@ -405,6 +407,18 @@ export default function LayerPanel({
                   primaryLayer.mask.enabled ? "bg-zinc-800 hover:bg-zinc-700" : "bg-red-900/60 text-white"
                 }`}
               >{primaryLayer.mask.enabled ? <Eye size={12} /> : <EyeOff size={12} />}</button>
+              {onApplyMask && !primaryLayer.adjust && (
+                <button
+                  onClick={() => onApplyMask(primaryLayer.id)}
+                  disabled={disabled || primaryLayer.locked || !primaryLayer.mask.enabled}
+                  title={
+                    primaryLayer.mask.enabled
+                      ? "Apply mask: bake it into the layer's pixels"
+                      : "Turn the mask on to apply it"
+                  }
+                  className="rounded bg-zinc-800 p-1 hover:bg-zinc-700 disabled:opacity-40"
+                ><Check size={12} /></button>
+              )}
               <button
                 onClick={() => dispatch({ type: "layer/maskDelete", id: primaryLayer.id })}
                 disabled={disabled || primaryLayer.locked}
