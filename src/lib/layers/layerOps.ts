@@ -145,6 +145,8 @@ export function duplicateLayer(layers: readonly Layer[], id: LayerId): {
     pose: { ...src.pose },
     crop: src.crop ? { ...src.crop } : null,
     locked: false,
+    // A copy in the same frame is a separate layer, not another frame's copy.
+    linkId: undefined,
   };
   return { layers: addLayer(layers, copy, id), newId: copy.id };
 }

@@ -81,6 +81,9 @@ export interface Layer {
   /** Lock transparent pixels: paint only recolours pixels the layer already
    *  has, so it never spills outside the shape and never changes alpha. */
   readonly alphaLock?: boolean;
+  /** Shared by the copies of one layer across frames (made by "new blank
+   *  layer on every frame"): blend and alpha lock changes apply to all. */
+  readonly linkId?: string;
 
   /** Pencil strokes, stored as recorded physics in layer space and drawn over
    *  `image` analytically at render time. Never baked unless a pixel tool
