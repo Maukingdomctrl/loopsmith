@@ -32,6 +32,10 @@ export interface PencilStroke {
   readonly size: number;
   /** Paper seed: every sheet has its own tooth. Copied on duplicate. */
   readonly seed: number;
+  /** Drawn with the layer's alpha lock on: graphite only recolours pixels
+   *  already there, never adds or removes alpha. Recorded per stroke so
+   *  toggling the lock later does not change strokes already drawn. */
+  readonly lockAlpha?: boolean;
   /** Flat samples, PENCIL_STRIDE numbers each. */
   readonly pts: readonly number[];
 }

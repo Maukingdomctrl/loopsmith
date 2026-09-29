@@ -198,6 +198,8 @@ export interface MaterialStrokeOptions {
   /** Layer px → canvas px, used to measure hand speed on screen. */
   readonly scale?: number;
   readonly seed?: number;
+  /** Alpha lock: only recolour pixels the layer already has. */
+  readonly lockAlpha?: boolean;
 }
 
 /** The mouse recipe in force: the selected material's, else the brush's. */

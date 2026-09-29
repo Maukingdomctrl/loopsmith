@@ -673,6 +673,7 @@ const commit = useCallback((next: Frame) => {
       const surface = surfaceRef.current!;
       const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
       onHistoryCommit?.();
+      const before = base.alphaLock ? surface.data.slice() : null;
       const res = floodFill(surface, {
         seed: local,
         color,
@@ -684,9 +685,13 @@ const commit = useCallback((next: Frame) => {
         grow: 0,
         feather: 0,
       } as FloodFillSettings);
+      if (before && res.pixelsFilled > 0) surface.keepAlpha(before, res.bounds);
       if (res.pixelsFilled > 0) commitSurface();
       return true;
     }
+
+    // Alpha lock keeps every pixel's alpha, so the eraser has nothing to do.
+    if (activeTool === "eraser" && base.alphaLock) return true;
 
     // pencil / eraser: record the stroke's physics
     onHistoryCommit?.();
@@ -705,6 +710,7 @@ const commit = useCallback((next: Frame) => {
         // a mouse or finger gets the brush's own stand-in
         hasPressure: reportsPressure(e),
         scale,
+        lockAlpha: base.alphaLock,
       });
       strokeRef.current.addSample(pointSample(e, local));
       schedulePreview();
@@ -716,6 +722,7 @@ const commit = useCallback((next: Frame) => {
       color: paintColor,
       size: brushSize / scale,
       seed: base.strokes?.[0]?.seed ?? seedFromString(base.id),
+      ...(base.alphaLock && { lockAlpha: true }),
       pts: [],
     };
     markLiveStroke(stroke);

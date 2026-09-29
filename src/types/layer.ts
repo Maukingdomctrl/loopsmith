@@ -23,19 +23,32 @@ export type BlendMode =
   | "multiply"
   | "screen"
   | "overlay"
+  | "color-dodge"
   | "darken"
   | "lighten"
   | "difference";
 
 export const BLEND_MODES: readonly BlendMode[] = [
-  "normal", "multiply", "screen", "overlay", "darken", "lighten", "difference",
+  "normal", "multiply", "screen", "overlay", "color-dodge", "darken", "lighten", "difference",
 ];
+
+export const BLEND_LABELS: Readonly<Record<BlendMode, string>> = {
+  normal: "Normal",
+  multiply: "Multiply",
+  screen: "Screen",
+  overlay: "Overlay",
+  "color-dodge": "Color Dodge",
+  darken: "Darken",
+  lighten: "Lighten",
+  difference: "Difference",
+};
 
 export const BLEND_TO_COMPOSITE: Readonly<Record<BlendMode, GlobalCompositeOperation>> = {
   normal: "source-over",
   multiply: "multiply",
   screen: "screen",
   overlay: "overlay",
+  "color-dodge": "color-dodge",
   darken: "darken",
   lighten: "lighten",
   difference: "difference",
@@ -65,6 +78,9 @@ export interface Layer {
   readonly visible: boolean;
   readonly locked: boolean;
   readonly blend: BlendMode;
+  /** Lock transparent pixels: paint only recolours pixels the layer already
+   *  has, so it never spills outside the shape and never changes alpha. */
+  readonly alphaLock?: boolean;
 
   /** Pencil strokes, stored as recorded physics in layer space and drawn over
    *  `image` analytically at render time. Never baked unless a pixel tool

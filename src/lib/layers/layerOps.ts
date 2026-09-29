@@ -248,6 +248,7 @@ function shallowEqualLayer(a: Layer, b: Layer): boolean {
     a.visible === b.visible &&
     a.locked === b.locked &&
     a.blend === b.blend &&
+    a.alphaLock === b.alphaLock &&
     a.size.w === b.size.w &&
     a.size.h === b.size.h &&
     a.crop === b.crop &&

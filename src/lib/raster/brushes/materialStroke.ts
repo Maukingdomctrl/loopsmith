@@ -270,6 +270,7 @@ export class MaterialStroke {
 
     this.restoreBaseline(target, region);
     this.model?.composite(target, region);
+    if (this.options.lockAlpha) target.keepAlpha(this.baseline, region);
     target.dirty.addRect(region);
   }
 
@@ -297,6 +298,7 @@ export class MaterialStroke {
 
     this.restoreBaseline(this.surface, region);
     this.model?.composite(this.surface, region);
+    if (this.options.lockAlpha) this.surface.keepAlpha(this.baseline, region);
     this.surface.dirty.addRect(region);
     return region;
   }
