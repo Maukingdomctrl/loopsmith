@@ -41,8 +41,8 @@ export const MATERIALS: Record<string, HardMaterial> = {
   // even and clean: width follows pressure closely and linearly, from a hairline
   // at a whisper to full width; a light touch is also a lighter line
   pen: {
-    width: { from: 0.02, to: 1, gamma: 1.5, ease: 0.4 },
-    opacity: { from: 0.06, to: 1, gamma: 1.3 },
+    width: { from: 0.02, to: 1, gamma: 1.8, ease: 0.4 },
+    opacity: { from: 0.05, to: 1, gamma: 1.7 },
     grain: 0,
   },
   // sharp graphite: pressure changes width AND how much lead is laid down
