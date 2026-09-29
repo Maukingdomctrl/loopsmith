@@ -30,8 +30,9 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 - **Hard Linework is stored like the pencil** (an `"ink"` stroke in `layer.strokes`, drawn by `pencil/render.ts`
   with the material curves from `brushes/models/hard.ts`), so it stays sharp at every zoom.
 - **The other brushes and fill work on pixels** (`lib/raster`: `RasterSurface`, `MaterialStroke`, `floodFill`, commit via
-  `surface.commit()`, decoded before it is swapped in so the canvas never blinks). Before brush, fill or the
-  lasso touch a layer, its pencil strokes are baked into `image` (`pencil/bake.ts`).
+  `surface.commit()`, decoded before it is swapped in so the canvas never blinks). When a pixel brush or fill
+  first paints on a layer (not when the tool is merely picked), its strokes are baked into the surface
+  (`pencil/bake.ts`); the lasso cuts from the rendered view.
 - **Brushes** (`lib/raster/brushes/`): one `MaterialStroke`, built on the existing `StrokePath`, drives five
   materials — soft round / soft rectangle, hard line, water, texture — picked in `components/BrushPanel.tsx`.
   A new brush is a `BrushSpec` in `presets.ts` plus a `BrushModel` in `models/`. Pressure only ever goes

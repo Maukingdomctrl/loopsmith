@@ -53,7 +53,7 @@ import {
   type PencilStroke,
 } from "@/lib/pencil/types";
 import { widthFactor } from "@/lib/pencil/render";
-import { bakeLayerStrokes } from "@/lib/pencil/bake";
+import { bakeStrokesIntoSurface } from "@/lib/pencil/bake";
 import { markLiveStroke, onStrokeRefine } from "@/lib/layers/composite";
 import type { FloodFillSettings } from "@/types/raster";
 import type { Frame } from "@/types/frame";
@@ -378,6 +378,22 @@ const commit = useCallback((next: Frame) => {
 
   const surfaceRef = useRef<RasterSurface | null>(null);
   const surfaceSrc = useRef<string | null>(null);
+  /** The surface now also holds the layer's strokes (baked at the first pixel paint). */
+  const bakedRef = useRef(false);
+  const unbakeRef = useRef<() => void>(() => {});
+  /** Before the first pixel paint on a layer with strokes: bake them into the
+   *  surface. Returns an undo for when nothing ends up painted. */
+  const bakeForPaint = (): (() => void) => {
+    const surface = surfaceRef.current;
+    if (!surface || !base?.strokes?.length || bakedRef.current) return () => {};
+    const snap = surface.snapshot();
+    bakeStrokesIntoSurface(surface, base);
+    bakedRef.current = true;
+    return () => {
+      surface.restore(snap);
+      bakedRef.current = false;
+    };
+  };
   /** The pencil / eraser stroke being drawn: its samples grow in place until pen-up. */
   const liveRef = useRef<{
     stroke: PencilStroke & { pts: number[] };
@@ -425,28 +441,8 @@ const commit = useCallback((next: Frame) => {
     // as strokes, like the pencil, so it stays sharp at every zoom.
     if (activeTool !== "fill" && (activeTool !== "brush" || brushIsVector)) return;
 
-    if (base.strokes?.length) {
-      let cancelled = false;
-      bakeLayerStrokes(base).then((image) => {
-        if (cancelled || !image) return;
-        loadBitmap(image)
-          .catch(() => null)
-          .then(() => {
-            if (cancelled) return;
-            const f = editRef.current;
-            commit({
-              ...f,
-              layers: f.layers.map((l) =>
-                l.id === base.id ? { ...l, image, strokes: [] } : l
-              ),
-              flattenKey: null,
-            });
-          });
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
+    // Strokes stay strokes here: they are baked into the surface only when a
+    // pixel tool actually paints (paintDown), so picking a tool changes nothing.
 
     // Blank sheet: a transparent surface of the layer's size.
     if (!base.image) {
@@ -486,7 +482,6 @@ const commit = useCallback((next: Frame) => {
   const surfaceReady = () =>
     !!surfaceRef.current &&
     !!base &&
-    !base.strokes?.length &&
     (surfaceSrc.current === base.image || surfaceSrc.current === pendingImageRef.current);
 
   /**
@@ -593,6 +588,8 @@ const commit = useCallback((next: Frame) => {
     if (!surface || !base) return;
     const out = surface.commit();
     if (!out) return;
+    const baked = bakedRef.current;
+    bakedRef.current = false;
     surfaceSrc.current = out.image;
     pendingImageRef.current = out.image;
     // Decode the new bitmap before swapping it in, so the canvas never
@@ -605,7 +602,9 @@ const commit = useCallback((next: Frame) => {
         const f = editRef.current;
         commit({
           ...f,
-          layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: out.image } : l)),
+          layers: f.layers.map((l) =>
+            l.id === base.id ? { ...l, image: out.image, ...(baked ? { strokes: [] } : {}) } : l
+          ),
           flattenKey: null,
         });
       });
@@ -715,6 +714,7 @@ const commit = useCallback((next: Frame) => {
       const surface = surfaceRef.current!;
       const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
       onHistoryCommit?.();
+      const unbake = bakeForPaint();
       const res = floodFill(surface, {
         seed: local,
         color,
@@ -727,6 +727,7 @@ const commit = useCallback((next: Frame) => {
         feather: 0,
       } as FloodFillSettings);
       if (res.pixelsFilled > 0) commitSurface();
+      else unbake();
       return true;
     }
 
@@ -736,6 +737,7 @@ const commit = useCallback((next: Frame) => {
     const scale = Math.max(1e-6, Math.abs(base.pose.scale.x));
     if (activeTool === "brush" && !brushIsVector) {
       if (!surfaceReady()) return true;
+      unbakeRef.current = bakeForPaint();
       strokeRef.current = new MaterialStroke(surfaceRef.current!, {
         brush: brushSpecNow,
         color: parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 },
@@ -830,7 +832,10 @@ const commit = useCallback((next: Frame) => {
       }
       // The preview stays on screen until the new bitmap is decoded (no blink).
       if (stroke.end()) commitSurface();
-      else setDecodeGeneration((g) => g + 1); // nothing drawn: repaint normally
+      else {
+        unbakeRef.current();
+        setDecodeGeneration((g) => g + 1); // nothing drawn: repaint normally
+      }
       return true;
     }
     const live = liveRef.current;
