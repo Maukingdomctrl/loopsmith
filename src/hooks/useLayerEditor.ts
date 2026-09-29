@@ -247,7 +247,7 @@ const dispatch = useCallback(
       const f = frameRef.current;
       const p = screenToCanvas(screen, getBounds(), viewRef.current);
       return pickTopmost(f.layers, (layer) => {
-        if (!layer.visible || !layer.image) return false;
+        if (!layer.visible || !(layer.image || layer.strokes?.length)) return false;
         const alphaAt = alphaFor?.(layer) ?? undefined;
         return (
           hitTestLayerBox(layerMatrix(layer), layerContentBox(layer), p, {

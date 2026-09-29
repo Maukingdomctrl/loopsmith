@@ -3,6 +3,7 @@
 import {
   useState,
   useEffect,
+  useLayoutEffect,
   useRef,
   useCallback,
   useMemo,
@@ -17,6 +18,7 @@ import {
   Redo2,
   X,
   Crosshair,
+  Pencil,
   Brush,
   Eraser,
   PaintBucket,
@@ -37,15 +39,22 @@ import {
 } from "@/lib/frameTransform";
 import { matApply, matInvert } from "@/lib/geometry/mat2d";
 import { RasterSurface } from "@/lib/raster/surface";
-import { BrushStroke } from "@/lib/raster/brush";
-import { EraserStroke } from "@/lib/raster/eraser";
+import { MaterialStroke } from "@/lib/raster/brushes/materialStroke";
+import { brushSpec, defaultBrushPrefs } from "@/lib/raster/brushes/presets";
+import type { BrushId, BrushPrefs } from "@/lib/raster/brushes/types";
 import { floodFill } from "@/lib/raster/floodFill";
 import { parseHex, toHex } from "@/lib/raster/color";
+import { normalizePressure } from "@/lib/raster/constants";
 import {
-  DEFAULT_BRUSH,
-  DEFAULT_ERASER,
-  normalizePressure,
-} from "@/lib/raster/constants";
+  PENCIL_MAX_SIZE,
+  PENCIL_MIN_SIZE,
+  createStrokeId,
+  seedFromString,
+  type PencilStroke,
+} from "@/lib/pencil/types";
+import { widthFactor } from "@/lib/pencil/render";
+import { bakeLayerStrokes } from "@/lib/pencil/bake";
+import { markLiveStroke, onStrokeRefine } from "@/lib/layers/composite";
 import type { FloodFillSettings } from "@/types/raster";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
@@ -61,6 +70,7 @@ import { defaultFitPose, screenToCanvas } from "@/lib/layers/layerSpace";
 import { makePose } from "@/lib/geometry/pose";
 import type { TransparencyState } from "@/hooks/useTransparency";
 import BrushCursor from "./BrushCursor";
+import BrushPanel from "./BrushPanel";
 
 export type CanvasView = {
   x: number;
@@ -122,6 +132,18 @@ interface CanvasProps {
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 8;
 const SAVE_DEBOUNCE_MS = 500;
+/** Size of a fresh drawing sheet on an empty frame. */
+const BLANK_SIZE = 512;
+/** Pressure used for a mouse, which reports none. */
+const MOUSE_PRESSURE = 0.62;
+
+/** Size slider: continuous and logarithmic, so small sizes get most of the
+ *  travel. 0…1000 ↔ PENCIL_MIN_SIZE…PENCIL_MAX_SIZE. */
+const SIZE_SPAN = Math.log(PENCIL_MAX_SIZE / PENCIL_MIN_SIZE);
+const sizeToSlider = (s: number) => (1000 * Math.log(s / PENCIL_MIN_SIZE)) / SIZE_SPAN;
+const sliderToSize = (v: number) => PENCIL_MIN_SIZE * Math.exp((v / 1000) * SIZE_SPAN);
+const formatSize = (s: number) =>
+  s < 1 ? s.toFixed(2) : s < 10 ? s.toFixed(1) : s.toFixed(0);
 
 const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
@@ -271,23 +293,37 @@ const commit = useCallback((next: Frame) => {
 
   /** Any layer with pixels. Replaces the old `frame.image` emptiness test. */
   const hasPixels = useMemo(
-    () => frame.layers.some((l) => l.image),
+    () => frame.layers.some((l) => l.image || l.strokes?.length),
     [frame.layers]
   );
 
   /* ================================================================ */
-  /*  Paint tools — wired to the lib/raster engine                     */
+  /*  Paint tools                                                       */
   /*                                                                   */
-  /*  All tools edit the BASE LAYER's own pixels (layer-local space),   */
-  /*  so results survive move/zoom/stabilize, show on any background,   */
-  /*  and are included in the export. One stroke = one undo step.       */
+  /*  Pencil and eraser record STROKE PHYSICS on the base layer         */
+  /*  (lib/pencil); the compositor renders them analytically at every   */
+  /*  resolution. Fill works on pixels (lib/raster) and folds strokes   */
+  /*  into the bitmap first. One stroke = one undo step.                */
   /* ================================================================ */
 
-  type PaintTool = "none" | "brush" | "eraser" | "fill" | "picker";
+  type PaintTool = "none" | "pencil" | "brush" | "eraser" | "fill" | "picker";
   const [paintTool, setPaintTool] = useState<PaintTool>("none");
-  const [paintColor, setPaintColor] = useState("#000000");
-  /** Brush radius in CANVAS px, so it matches the on-screen cursor. */
-  const [brushSize, setBrushSize] = useState(8);
+  const [paintColor, setPaintColor] = useState("#2b2b2b");
+  /** Pencil / eraser tip radius at full pressure, in CANVAS px (continuous). */
+  const [brushSize, setBrushSize] = useState(1.5);
+  /** Live pen pressure, so the cursor tip shows the width being drawn. */
+  const [tipPressure, setTipPressure] = useState(MOUSE_PRESSURE);
+  /** Which of the five brushes the Brush tool paints with, and each one's own settings. */
+  const [brushId, setBrushId] = useState<BrushId>("softRound");
+  const [brushPrefs, setBrushPrefs] = useState<Record<BrushId, BrushPrefs>>(() =>
+    defaultBrushPrefs()
+  );
+  const [brushPanelOpen, setBrushPanelOpen] = useState(false);
+  const brushPanelRef = useRef<HTMLDivElement>(null);
+  const paintToolsRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  /** Where the brush panel sits, in the workspace's own coordinates. */
+  const [brushPanelPos, setBrushPanelPos] = useState({ left: 12, top: 12 });
 
   /** The panel's "Eraser brush" switch still works: it maps to the eraser tool. */
   const activeTool: PaintTool =
@@ -297,16 +333,91 @@ const commit = useCallback((next: Frame) => {
         ? "eraser"
         : "none";
 
+  const brushNow = brushPrefs[brushId];
+  const brushSpecNow = brushSpec(brushId);
+  const brushPanelVisible = brushPanelOpen && activeTool === "brush";
+  /** The radius the cursor and the size bar show: the brush's own, or the eraser's. */
+  const brushPanelVisibleRef = useRef(false);
+  useEffect(() => {
+    brushPanelVisibleRef.current = brushPanelVisible;
+  }, [brushPanelVisible]);
+
   const surfaceRef = useRef<RasterSurface | null>(null);
   const surfaceSrc = useRef<string | null>(null);
-  const strokeRef = useRef<BrushStroke | EraserStroke | null>(null);
-  const previewRaf = useRef(0);
+  /** The pencil / eraser stroke being drawn: its samples grow in place until pen-up. */
+  const liveRef = useRef<{ stroke: PencilStroke & { pts: number[] }; t0: number } | null>(null);
+  /** The material brush stroke being drawn on the pixel surface. */
+  const strokeRef = useRef<MaterialStroke | null>(null);
   const scratchRef = useRef<HTMLCanvasElement | null>(null);
+  /** A committed bitmap still decoding; the surface already holds it. */
+  const pendingImageRef = useRef<string | null>(null);
+  const previewRaf = useRef(0);
 
-  // Keep an editable surface of the base bitmap ready while a tool is active.
+  // Tools need a sheet: an empty base layer becomes a 512×512 page. Fill needs
+  // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
-    if (!base?.image || surfaceSrc.current === base.image) return;
+    if (!base) return;
+
+    if (!base.image && !base.strokes?.length) {
+      if (base.size.w !== BLANK_SIZE || base.size.h !== BLANK_SIZE) {
+        const f = editRef.current;
+        commit({
+          ...f,
+          layers: f.layers.map((l) =>
+            l.id === base.id
+              ? {
+                  ...l,
+                  size: { w: BLANK_SIZE, h: BLANK_SIZE },
+                  pose: makePose(defaultFitPose(BLANK_SIZE, BLANK_SIZE)),
+                }
+              : l
+          ),
+        });
+        return;
+      }
+    }
+
+    // Fill and the material brushes work on pixels.
+    if (activeTool !== "fill" && activeTool !== "brush") return;
+
+    if (base.strokes?.length) {
+      let cancelled = false;
+      bakeLayerStrokes(base).then((image) => {
+        if (cancelled || !image) return;
+        loadBitmap(image)
+          .catch(() => null)
+          .then(() => {
+            if (cancelled) return;
+            const f = editRef.current;
+            commit({
+              ...f,
+              layers: f.layers.map((l) =>
+                l.id === base.id ? { ...l, image, strokes: [] } : l
+              ),
+              flattenKey: null,
+            });
+          });
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Blank sheet: a transparent surface of the layer's size.
+    if (!base.image) {
+      if (surfaceRef.current && surfaceSrc.current === null) return;
+      surfaceRef.current = new RasterSurface(
+        Math.max(1, Math.round(base.size.w)),
+        Math.max(1, Math.round(base.size.h))
+      );
+      surfaceSrc.current = null;
+      return;
+    }
+
+    if (surfaceSrc.current === base.image) return;
+    // A stroke was just committed and is still decoding: the surface is newer.
+    if (surfaceSrc.current && surfaceSrc.current === pendingImageRef.current) return;
     let cancelled = false;
     const src = base.image;
     RasterSurface.fromLayer(base)
@@ -319,7 +430,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, base]);
+  }, [activeTool, base, commit]);
 
   /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
   const toLocal = useCallback((cx: number, cy: number) => {
@@ -329,57 +440,90 @@ const commit = useCallback((next: Frame) => {
   }, []);
 
   const surfaceReady = () =>
-    !!surfaceRef.current && !!base && surfaceSrc.current === base.image;
+    !!surfaceRef.current &&
+    !!base &&
+    !base.strokes?.length &&
+    (surfaceSrc.current === base.image || surfaceSrc.current === pendingImageRef.current);
 
   /**
-   * Live preview while a stroke is in progress: repaint the composite with the
-   * base layer hidden, then draw the working surface through the layer matrix.
+   * Live preview while a stroke is in progress: the normal composite, with the
+   * live stroke appended to the base layer. Earlier strokes come from the
+   * compositor's cache, so only the live stroke is rendered each frame.
    */
   const paintPreview = useCallback(() => {
     previewRaf.current = 0;
     const canvas = baseCanvasRef.current;
-    const surface = surfaceRef.current;
+    const live = liveRef.current;
     const stroke = strokeRef.current;
-    if (!canvas || !surface || !stroke || !base) return;
+    if (!canvas || !base || (!live && !stroke)) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    stroke.previewInto();
-
-    let scratch = scratchRef.current;
-    if (!scratch) {
-      scratch = document.createElement("canvas");
-      scratchRef.current = scratch;
-    }
-    if (scratch.width !== surface.width) scratch.width = surface.width;
-    if (scratch.height !== surface.height) scratch.height = surface.height;
-    const sctx = scratch.getContext("2d");
-    if (!sctx) return;
-    const { data } = surface.toImageData();
-    const px = new Uint8ClampedArray(new ArrayBuffer(data.length));
-    px.set(data);
-    sctx.putImageData(new ImageData(px, surface.width, surface.height), 0, 0);
-
     const f = editRef.current;
+
+    // Material brush: the composite with the base layer hidden, then the
+    // working surface drawn through the layer matrix.
+    if (stroke) {
+      const surface = surfaceRef.current;
+      if (!surface) return;
+      stroke.previewInto();
+      let scratch = scratchRef.current;
+      if (!scratch) {
+        scratch = document.createElement("canvas");
+        scratchRef.current = scratch;
+      }
+      if (scratch.width !== surface.width) scratch.width = surface.width;
+      if (scratch.height !== surface.height) scratch.height = surface.height;
+      const sctx = scratch.getContext("2d");
+      if (!sctx) return;
+      const { data } = surface.toImageData();
+      const px = new Uint8ClampedArray(new ArrayBuffer(data.length));
+      px.set(data);
+      sctx.putImageData(new ImageData(px, surface.width, surface.height), 0, 0);
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      drawFrameLayers(
+        ctx,
+        {
+          ...f,
+          layers: f.layers.map((l) => (l.id === base.id ? { ...l, visible: false } : l)),
+        },
+        CANVAS_SIZE,
+        { background, resolve: domResolver(), checkerboard: true }
+      );
+      const m = baseLayerMatrix(f);
+      if (!m) return;
+      ctx.save();
+      ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(scratch, 0, 0);
+      ctx.restore();
+      return;
+    }
+    if (!live) return;
+
+    // Cursor tip follows pressure, at most once a frame and in small steps,
+    // so the whole editor does not re-render on every pen sample.
+    const pts = live.stroke.pts;
+    if (pts.length >= 7) {
+      const q = Math.round(pts[pts.length - 5] * 20) / 20;
+      setTipPressure((cur) => (cur === q ? cur : q));
+    }
+
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
     drawFrameLayers(
       ctx,
       {
         ...f,
-        layers: f.layers.map((l) => (l.id === base.id ? { ...l, visible: false } : l)),
+        layers: f.layers.map((l) =>
+          l.id === base.id ? { ...l, strokes: [...(l.strokes ?? []), live.stroke] } : l
+        ),
       },
       CANVAS_SIZE,
       { background, resolve: domResolver(), checkerboard: true }
     );
-
-    const m = baseLayerMatrix(f);
-    if (!m) return;
-    ctx.save();
-    ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(scratch, 0, 0);
-    ctx.restore();
   }, [base, background]);
 
   const schedulePreview = useCallback(() => {
@@ -402,22 +546,89 @@ const commit = useCallback((next: Frame) => {
     const out = surface.commit();
     if (!out) return;
     surfaceSrc.current = out.image;
-    const f = editRef.current;
-    commit({
-      ...f,
-      layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: out.image } : l)),
-      flattenKey: null,
-    });
+    pendingImageRef.current = out.image;
+    // Decode the new bitmap before swapping it in, so the canvas never
+    // redraws for a moment without the stroke (the flicker on pen-up).
+    loadBitmap(out.image)
+      .catch(() => null)
+      .then(() => {
+        if (surfaceSrc.current !== out.image) return; // a newer stroke already landed
+        pendingImageRef.current = null;
+        const f = editRef.current;
+        commit({
+          ...f,
+          layers: f.layers.map((l) => (l.id === base.id ? { ...l, image: out.image } : l)),
+          flattenKey: null,
+        });
+      });
   }, [base, commit]);
 
-  const pointSample = (e: React.PointerEvent, local: { x: number; y: number }) => ({
-    x: local.x,
-    y: local.y,
-    pressure: normalizePressure(e.pressure, e.pointerType === "pen"),
-    tilt: 0,
-    twist: 0,
-    time: e.timeStamp,
-  });
+  /** One pointer sample in base-layer pixels. Takes a React event or a native (coalesced) one. */
+  const pointSample = (
+    e: Pick<PointerEvent, "pressure" | "pointerType" | "timeStamp" | "tiltX" | "tiltY" | "twist">,
+    local: { x: number; y: number }
+  ) => {
+    // a leaning pen: how far it leans (tilt) and toward where (azimuth)
+    const tx = Math.tan(((e.tiltX || 0) * Math.PI) / 180);
+    const ty = Math.tan(((e.tiltY || 0) * Math.PI) / 180);
+    return {
+      x: local.x,
+      y: local.y,
+      pressure: normalizePressure(e.pressure, e.pointerType === "pen"),
+      tilt: Math.atan(Math.hypot(tx, ty)),
+      azimuth: Math.atan2(ty, tx),
+      twist: ((e.twist || 0) * Math.PI) / 180,
+      time: e.timeStamp,
+    };
+  };
+
+  /**
+   * One pencil sample: layer-space position (float, unrounded), pressure at
+   * full device precision, tilt and lean direction (converted into layer
+   * space), barrel twist and time.
+   */
+  const pencilSample = (ev: PointerEvent, t0: number): number[] | null => {
+    const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
+    const p = screenToCanvas({ x: ev.clientX, y: ev.clientY }, rect, view);
+    const m = baseLayerMatrix(editRef.current);
+    const inv = m ? matInvert(m) : null;
+    if (!inv) return null;
+    const local = matApply(inv, p);
+
+    const isPen = ev.pointerType === "pen";
+    const pressure = isPen
+      ? Math.min(1, Math.max(0, ev.pressure))
+      : ev.pointerType === "touch" && ev.pressure > 0 && ev.pressure !== 0.5
+        ? Math.min(1, ev.pressure)
+        : MOUSE_PRESSURE;
+
+    let tilt = 0;
+    let azimuth = 0;
+    if (isPen) {
+      const pe = ev as PointerEvent & { altitudeAngle?: number; azimuthAngle?: number };
+      let altitude: number;
+      let screenAz: number;
+      if (typeof pe.altitudeAngle === "number" && typeof pe.azimuthAngle === "number") {
+        altitude = pe.altitudeAngle;
+        screenAz = pe.azimuthAngle;
+      } else {
+        const tx = Math.tan(((ev.tiltX ?? 0) * Math.PI) / 180);
+        const ty = Math.tan(((ev.tiltY ?? 0) * Math.PI) / 180);
+        const lean = Math.hypot(tx, ty);
+        altitude = lean > 0 ? Math.atan(1 / lean) : Math.PI / 2;
+        screenAz = Math.atan2(ty, tx);
+      }
+      // Ignore the first ~10° of lean (a pen is never perfectly upright).
+      tilt = Math.min(1, Math.max(0, (Math.PI / 2 - altitude - 0.17) / 0.87));
+      // Screen direction → canvas (undo view rotation) → layer space.
+      const va = screenAz - (view.rotation * Math.PI) / 180;
+      const dx = Math.cos(va);
+      const dy = Math.sin(va);
+      azimuth = Math.atan2(inv.b * dx + inv.d * dy, inv.a * dx + inv.c * dy);
+    }
+    const twist = (((ev as PointerEvent).twist ?? 0) * Math.PI) / 180;
+    return [local.x, local.y, pressure, tilt, azimuth, twist, ev.timeStamp - t0];
+  };
 
   /** Returns true when a paint tool consumed the event. */
   const paintDown = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
@@ -436,19 +647,19 @@ const commit = useCallback((next: Frame) => {
         ).data;
         if (d[3] > 0) {
           setPaintColor(toHex({ r: d[0] / 255, g: d[1] / 255, b: d[2] / 255, a: 1 }));
-          setPaintTool("brush");
+          setPaintTool("pencil");
         }
       }
       return true;
     }
 
-    if (!surfaceReady()) return true;
     const local = toLocal(p.x, p.y);
     if (!local || !base) return true;
-    const surface = surfaceRef.current!;
-    const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
 
     if (activeTool === "fill") {
+      if (!surfaceReady()) return true;
+      const surface = surfaceRef.current!;
+      const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
       onHistoryCommit?.();
       const res = floodFill(surface, {
         seed: local,
@@ -465,36 +676,106 @@ const commit = useCallback((next: Frame) => {
       return true;
     }
 
-    // brush / eraser
+    // pencil / eraser: record the stroke's physics
     onHistoryCommit?.();
     e.currentTarget.setPointerCapture(e.pointerId);
-    const radius = brushSize / Math.max(1e-6, Math.abs(base.pose.scale.x));
-    strokeRef.current =
-      activeTool === "eraser"
-        ? new EraserStroke(surface, { ...DEFAULT_ERASER, radius })
-        : new BrushStroke(surface, { ...DEFAULT_BRUSH, radius, color });
-    strokeRef.current.addSample(pointSample(e, local));
+    const scale = Math.max(1e-6, Math.abs(base.pose.scale.x));
+    if (activeTool === "brush") {
+      if (!surfaceReady()) return true;
+      strokeRef.current = new MaterialStroke(surfaceRef.current!, {
+        brush: brushSpecNow,
+        color: parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 },
+        radius: brushNow.size / scale,
+        intensity: brushNow.intensity,
+        material: brushNow.material,
+        angle: (brushNow.angle * Math.PI) / 180,
+        // only a pen has real pressure; a mouse or finger gets the brush's own stand-in
+        hasPressure: e.pointerType === "pen",
+        scale,
+      });
+      strokeRef.current.addSample(pointSample(e, local));
+      schedulePreview();
+      return true;
+    }
+    const stroke: PencilStroke & { pts: number[] } = {
+      id: createStrokeId(),
+      kind: activeTool === "eraser" ? "erase" : "graphite",
+      color: paintColor,
+      size: brushSize / scale,
+      seed: base.strokes?.[0]?.seed ?? seedFromString(base.id),
+      pts: [],
+    };
+    markLiveStroke(stroke);
+    const t0 = e.timeStamp;
+    const first = pencilSample(e.nativeEvent, t0);
+    if (first) {
+      stroke.pts.push(...first);
+      setTipPressure(first[2]);
+    }
+    liveRef.current = { stroke, t0 };
     schedulePreview();
     return true;
   };
 
   const paintMove = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
-    const stroke = strokeRef.current;
-    if (!stroke) return false;
     const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
-    const p = screenToCanvas({ x: e.clientX, y: e.clientY }, rect, view);
-    const local = toLocal(p.x, p.y);
-    if (local) {
-      stroke.addSample(pointSample(e, local));
-      schedulePreview();
+    // Pens report far more samples than frames: take every one of them.
+    const native = e.nativeEvent;
+    const batch = native.getCoalescedEvents?.() ?? [];
+    const events: PointerEvent[] = batch.length ? batch : [native];
+
+    const stroke = strokeRef.current;
+    if (stroke) {
+      let fed = false;
+      for (const ev of events) {
+        const p = screenToCanvas({ x: ev.clientX, y: ev.clientY }, rect, view);
+        const local = toLocal(p.x, p.y);
+        if (local) {
+          stroke.addSample(pointSample(ev, local));
+          fed = true;
+        }
+      }
+      if (fed) schedulePreview();
+      return true;
     }
+
+    const live = liveRef.current;
+    if (!live) return false;
+    const pts = live.stroke.pts;
+    for (const ev of events) {
+      const smp = pencilSample(ev, live.t0);
+      if (!smp) continue;
+      const n = pts.length;
+      if (n >= 7) {
+        const d = Math.hypot(smp[0] - pts[n - 7], smp[1] - pts[n - 6]);
+        if (d < 0.01 && Math.abs(smp[2] - pts[n - 5]) < 0.01) continue;
+      }
+      pts.push(...smp);
+    }
+    schedulePreview();
     return true;
   };
 
   const paintUp = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
     const stroke = strokeRef.current;
-    if (!stroke) return activeTool !== "none";
-    strokeRef.current = null;
+    if (stroke) {
+      strokeRef.current = null;
+      if (previewRaf.current) {
+        cancelAnimationFrame(previewRaf.current);
+        previewRaf.current = 0;
+      }
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      // The preview stays on screen until the new bitmap is decoded (no blink).
+      if (stroke.end()) commitSurface();
+      else setDecodeGeneration((g) => g + 1); // nothing drawn: repaint normally
+      return true;
+    }
+    const live = liveRef.current;
+    if (!live) return activeTool !== "none";
+    liveRef.current = null;
+    setTipPressure(MOUSE_PRESSURE);
     if (previewRaf.current) {
       cancelAnimationFrame(previewRaf.current);
       previewRaf.current = 0;
@@ -502,29 +783,102 @@ const commit = useCallback((next: Frame) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-    const region = stroke.end();
-    if (region) commitSurface();
-    else setDecodeGeneration((g) => g + 1); // nothing drawn: repaint normally
+    if (!base || live.stroke.pts.length === 0) {
+      setDecodeGeneration((g) => g + 1);
+      return true;
+    }
+    const done: PencilStroke = { ...live.stroke, pts: live.stroke.pts.slice() };
+    const f = editRef.current;
+    commit({
+      ...f,
+      layers: f.layers.map((l) =>
+        l.id === base.id ? { ...l, strokes: [...(l.strokes ?? []), done] } : l
+      ),
+      flattenKey: null,
+    });
     return true;
   };
 
-  // Shortcuts: B brush, E eraser, G fill, I picker, Esc puts the tool away.
+  // Shortcuts: P pencil, B brush, E eraser, G fill, I picker, Esc puts the tool away.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // Ignore keys only while TYPING. A slider or the colour swatch keeps focus
+      // after it is used, and must not swallow Esc / B / E from then on.
+      const typing =
+        !!t &&
+        (t.tagName === "TEXTAREA" ||
+          t.isContentEditable ||
+          (t.tagName === "INPUT" &&
+            !["range", "color", "checkbox", "radio", "button"].includes(
+              (t as HTMLInputElement).type
+            )));
+      if (typing) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      const map: Record<string, PaintTool> = { b: "brush", e: "eraser", g: "fill", i: "picker" };
+      const map: Record<string, PaintTool> = {
+        p: "pencil",
+        b: "brush",
+        e: "eraser",
+        g: "fill",
+        i: "picker",
+      };
       if (map[k]) {
         setPaintTool((cur) => (cur === map[k] ? "none" : map[k]));
-      } else if (e.key === "Escape" && !strokeRef.current) {
-        setPaintTool("none");
+      } else if (e.key === "Escape" && !liveRef.current && !strokeRef.current) {
+        // Esc closes the brush panel first, then puts the tool away.
+        if (brushPanelVisibleRef.current) setBrushPanelOpen(false);
+        else setPaintTool("none");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Place the panel: in the margin beside the canvas frame when there is room,
+  // otherwise just right of the tool column (over the artwork), so the tools and
+  // the colour swatch stay reachable while it is open.
+  useLayoutEffect(() => {
+    if (!brushPanelVisible) return;
+    const PANEL_W = 268, GAP = 12, TOOLS = 68;
+    const place = () => {
+      const sec = sectionRef.current;
+      const frame = canvasContainerRef.current;
+      if (!sec || !frame) return;
+      const s = sec.getBoundingClientRect();
+      const f = frame.getBoundingClientRect();
+      const frameLeft = f.left - s.left;
+      const beside = frameLeft - GAP - PANEL_W;
+      setBrushPanelPos({
+        left: beside >= 12 ? beside : frameLeft + TOOLS,
+        top: Math.max(12, f.top - s.top),
+      });
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    if (sectionRef.current) ro.observe(sectionRef.current);
+    window.addEventListener("resize", place);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [brushPanelVisible, canvasContainerRef]);
+
+  // Clicking anywhere outside the panel dismisses it — except in the tool
+  // column, so the colour can be changed with the panel open (its previews are
+  // drawn in that colour) and the Brush icon can toggle it. The listener is on
+  // the capture phase and never stops the event, so a click on the canvas both
+  // closes the panel and starts the stroke.
+  useEffect(() => {
+    if (!brushPanelVisible) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (t && (brushPanelRef.current?.contains(t) || paintToolsRef.current?.contains(t))) return;
+      setBrushPanelOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [brushPanelVisible]);
 
   /** Native bitmap dimensions of the current frame's base layer. */
   const nativeSizeRef = useRef({
@@ -705,6 +1059,10 @@ const commit = useCallback((next: Frame) => {
     };
   }, [editFrame.layers, editor, isPlaying]);
 
+  // A pencil layer shown as a stand-in during a view change has been rendered
+  // exactly: repaint.
+  useEffect(() => onStrokeRefine(() => setDecodeGeneration((g) => g + 1)), []);
+
   /* ---------- Base layer (full composite) ---------- */
 
   /**
@@ -730,6 +1088,7 @@ const commit = useCallback((next: Frame) => {
     background,
     resolve: domResolver(),
     checkerboard: true,
+    interactive: true,
   });
 
   // NEW — apply transparency mask
@@ -770,7 +1129,7 @@ const commit = useCallback((next: Frame) => {
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
     if (!onionSkin || !previousFrame) return;
-    if (!previousFrame.layers.some((l) => l.image && l.visible)) return;
+    if (!previousFrame.layers.some((l) => (l.image || l.strokes?.length) && l.visible)) return;
 
     drawFrameLayers(ctx, previousFrame, CANVAS_SIZE, {
       background: ONION_BACKGROUND,
@@ -842,6 +1201,8 @@ const commit = useCallback((next: Frame) => {
               size: { w: width, h: height },
               crop: null,
               pose: makePose(defaultFitPose(width, height)),
+              // The cut came from the rendered canvas, strokes included.
+              strokes: [],
             }
           : l
       );
@@ -1449,7 +1810,9 @@ const handleCanvasPointerUp = (
   editor.tool !== "crop" &&
   (editor.selection.ids.length > 0 || editor.tool === "straighten");
 
-  const cursorClass = lassoMode || activeTool !== "none"
+  const cursorClass = activeTool === "pencil" || activeTool === "brush" || activeTool === "eraser"
+    ? "cursor-none"
+    : lassoMode || activeTool !== "none"
     ? "cursor-crosshair"
     : editor.tool === "crop" || editor.tool === "straighten"
       ? "cursor-crosshair"
@@ -1458,7 +1821,10 @@ const handleCanvasPointerUp = (
         : "cursor-grab";
 
   return (
-    <section className="flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-[#0B0D12]">
+    <section
+      ref={sectionRef}
+      className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-[#0B0D12]"
+    >
       <div
         ref={canvasContainerRef}
         className="relative h-[512px] w-[512px] overflow-hidden rounded-3xl"
@@ -1491,7 +1857,7 @@ const handleCanvasPointerUp = (
             onImageDrop?.(file);
           }}
           onDoubleClick={() => {
-            if (!isPlaying && !hasPixels) onImport?.();
+            if (!isPlaying && !hasPixels && activeTool === "none") onImport?.();
           }}
           
 onPointerCancel={(e) => {
@@ -1578,9 +1944,20 @@ onPointerCancel={(e) => {
               />
             )}
 
-            {!hasPixels && (
-              <div className="pointer-events-none absolute inset-0 flex h-full items-center justify-center font-medium text-gray-500">
-                Double-click to import PNG
+            {!hasPixels && activeTool === "none" && !isPlaying && (
+              <div className="pointer-events-none absolute inset-0 flex h-full items-center justify-center gap-3">
+                <button
+                  onClick={() => setPaintTool("pencil")}
+                  className="pointer-events-auto rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                >
+                  Start drawing
+                </button>
+                <button
+                  onClick={() => onImport?.()}
+                  className="pointer-events-auto rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600"
+                >
+                  Import image
+                </button>
               </div>
             )}
 
@@ -1629,9 +2006,21 @@ onPointerCancel={(e) => {
             />
             <BrushCursor
               position={brushPos}
-              radius={brushSize}
+              radius={
+                activeTool === "brush" ? brushNow.size : brushSize * widthFactor(tipPressure)
+              }
+              shape={
+                activeTool === "brush" && brushSpecNow.shape === "rect" ? "square" : "round"
+              }
+              aspect={activeTool === "brush" ? brushSpecNow.aspect ?? 1 : 1}
+              angle={
+                activeTool === "brush" && brushSpecNow.shape === "rect"
+                  ? brushNow.angle + (base?.pose.rotation ?? 0)
+                  : -view.rotation
+              }
+              color={paintColor}
               erasing={activeTool === "eraser"}
-              visible={activeTool === "brush" || activeTool === "eraser"}
+              visible={activeTool === "pencil" || activeTool === "brush" || activeTool === "eraser"}
             />
           </div>
 
@@ -1689,9 +2078,13 @@ onPointerCancel={(e) => {
         )}
 
         {/* ---------- Paint tools ---------- */}
-        <div className="absolute left-3 top-3 z-50 flex flex-col gap-2 rounded-xl bg-black/60 p-1.5">
+        <div
+          ref={paintToolsRef}
+          className="absolute left-3 top-3 z-50 flex flex-col gap-2 rounded-xl bg-black/60 p-1.5"
+        >
           {(
             [
+              ["pencil", Pencil, "Pencil (P)"],
               ["brush", Brush, "Brush (B)"],
               ["eraser", Eraser, "Eraser (E)"],
               ["fill", PaintBucket, "Fill (G)"],
@@ -1700,8 +2093,24 @@ onPointerCancel={(e) => {
           ).map(([id, Icon, label]) => (
             <button
               key={id}
-              disabled={isPlaying || !hasPixels}
-              onClick={() => setPaintTool(paintTool === id ? "none" : id)}
+              disabled={isPlaying}
+              onClick={() => {
+                if (id === "brush") {
+                  // The Brush opens its panel. It is put away with B, Esc or
+                  // by picking another tool, so a second click can close the
+                  // panel without dropping the tool.
+                  if (activeTool !== "brush") {
+                    setPaintTool("brush");
+                    setBrushPanelOpen(true);
+                  } else {
+                    setBrushPanelOpen((open) => !open);
+                  }
+                  return;
+                }
+                setPaintTool(paintTool === id ? "none" : id);
+              }}
+              aria-haspopup={id === "brush" ? "dialog" : undefined}
+              aria-expanded={id === "brush" ? brushPanelVisible : undefined}
               title={label}
               aria-label={label}
               className={`flex h-9 w-9 items-center justify-center rounded-lg text-white transition disabled:opacity-30 ${
@@ -1727,18 +2136,31 @@ onPointerCancel={(e) => {
           </label>
         </div>
 
-        {(activeTool === "brush" || activeTool === "eraser") && (
+        {/* The brush panel carries its own size slider; this bar is for the pencil and eraser, and for the brush while its panel is shut. */}
+        {(activeTool === "pencil" ||
+          activeTool === "eraser" ||
+          (activeTool === "brush" && !brushPanelVisible)) && (
           <div className="absolute left-16 top-3 z-50 flex items-center gap-2 rounded-xl bg-black/70 px-3 py-2 text-xs text-white">
             <span className="text-zinc-300">Size</span>
             <input
               type="range"
-              min={1}
-              max={64}
-              value={brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
+              min={activeTool === "brush" ? brushSpecNow.minSize : 0}
+              max={activeTool === "brush" ? brushSpecNow.maxSize : 1000}
+              step={activeTool === "brush" ? (brushSpecNow.maxSize <= 32 ? 0.5 : 1) : "any"}
+              value={activeTool === "brush" ? brushNow.size : sizeToSlider(brushSize)}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (activeTool === "brush") {
+                  setBrushPrefs((m) => ({ ...m, [brushId]: { ...m[brushId], size: v } }));
+                } else {
+                  setBrushSize(sliderToSize(v));
+                }
+              }}
               className="w-28 accent-indigo-500"
             />
-            <span className="w-6 text-right tabular-nums">{brushSize}</span>
+            <span className="w-8 text-right tabular-nums">
+              {activeTool === "brush" ? brushNow.size : formatSize(brushSize)}
+            </span>
           </div>
         )}
 
@@ -2055,6 +2477,26 @@ onPointerCancel={(e) => {
           </button>
         </div>
       </div>
+
+      {/* The panel lives outside the frame because the frame clips its children. */}
+      {brushPanelVisible && (
+        <div
+          ref={brushPanelRef}
+          className="absolute z-[60] flex max-h-[calc(100%-24px)]"
+          style={{ left: brushPanelPos.left, top: brushPanelPos.top }}
+        >
+          <BrushPanel
+            brushId={brushId}
+            prefs={brushPrefs}
+            color={paintColor}
+            onSelect={setBrushId}
+            onChange={(id, patch) =>
+              setBrushPrefs((m) => ({ ...m, [id]: { ...m[id], ...patch } }))
+            }
+            onClose={() => setBrushPanelOpen(false)}
+          />
+        </div>
+      )}
     </section>
   );
 }

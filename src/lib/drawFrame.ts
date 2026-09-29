@@ -63,6 +63,7 @@ export function drawFrameLayers(
     globalAlpha?: number;
     checkerboard?: boolean;
     smoothing?: boolean;
+    interactive?: boolean;
   } = {}
 ): void {
   compositeLayers(ctx, frame.layers, opts.resolve ?? domResolver(), {
@@ -73,5 +74,6 @@ export function drawFrameLayers(
     globalAlpha: opts.globalAlpha ?? 1,
     onlyLayerIds: null,
     smoothing: opts.smoothing ?? false,
+    interactive: opts.interactive ?? false,
   });
 }

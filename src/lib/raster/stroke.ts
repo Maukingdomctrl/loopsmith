@@ -63,6 +63,8 @@ export interface SampleDynamics {
   readonly tilt: number;
   readonly twist: number;
   readonly speed: number;
+  readonly time: number;
+  readonly azimuth: number;
 }
 
 export const bezierPoint = (s: CubicSegment, t: number): Vec2 => {
@@ -286,13 +288,16 @@ export class StrokePath {
     if (this.knots.length > 0) {
       const prev = this.knots[this.knots.length - 1];
       if (Math.hypot(point.x - prev.x, point.y - prev.y) < MIN_SAMPLE_DISTANCE) {
-        // Dwell: keep the strongest dynamics seen at this position.
+        // Dwell: keep the strongest dynamics seen at this position. Time moves
+        // on with the pointer, so a pause is not smeared over the next span.
         const i = this.dynamics.length - 1;
         this.dynamics[i] = {
           pressure: Math.max(this.dynamics[i].pressure, dyn.pressure),
           tilt: dyn.tilt,
           twist: dyn.twist,
           speed: dyn.speed,
+          time: dyn.time,
+          azimuth: dyn.azimuth,
         };
         return false;
       }
@@ -335,19 +340,23 @@ export class StrokePath {
       tilt: s.tilt,
       twist: s.twist,
       speed: this.speed,
+      time: s.time,
+      azimuth: s.azimuth ?? 0,
     };
   }
 
   /**
    * Finalize any segment that the newest knot has made determinate.
    *
-   * A Catmull-Rom span p1→p2 needs p0 and p3. So with k knots, spans up to
-   * index k−3 are final and spans beyond are provisional. Only final spans are
-   * pushed, which is what guarantees no already-stamped geometry is revised.
+   * Segment i spans knot i → knot i+1, and a Catmull-Rom span needs one knot on
+   * either side. So with k knots, spans up to index k−3 are final (each has a
+   * real knot beyond it) and the newest span is provisional. Only final spans
+   * are pushed, which is what guarantees no already-stamped geometry is
+   * revised.
    */
   private rebuildTail(): void {
     const k = this.knots.length;
-    const wanted = Math.max(0, k - 3);
+    const wanted = Math.max(0, k - 2);
     while (this.segments.length < wanted) {
       const i = this.segments.length;
       this.segments.push(this.makeSegment(i));
@@ -360,10 +369,14 @@ export class StrokePath {
     // guaranteed to pass through the first and last sample exactly — an
     // extrapolated phantom knot would let the stroke start slightly off the
     // point the user touched.
-    const p0 = k[i] ?? k[0];
-    const p1 = k[i + 1] ?? p0;
-    const p2 = k[i + 2] ?? p1;
-    const p3 = k[i + 3] ?? p2;
+    //
+    // Segment i runs from knot i to knot i+1. (It used to run from i+1 to i+2,
+    // which silently dropped the FIRST span of every stroke: the mark began one
+    // pointer event away from where the pen touched down.)
+    const p1 = k[i];
+    const p2 = k[i + 1] ?? p1;
+    const p0 = k[i - 1] ?? p1;
+    const p3 = k[i + 2] ?? p2;
 
     const { c1, c2 } = catmullRomToBezier(p0, p1, p2, p3, this.alpha);
     const { lut, length } = buildArcLengthLUT(p1, c1, c2, p2);
@@ -373,8 +386,8 @@ export class StrokePath {
 
     return {
       p0: p1, p1: c1, p2: c2, p3: p2,
-      startDynamics: this.dynamics[i + 1] ?? this.dynamics[0],
-      endDynamics: this.dynamics[i + 2] ?? this.dynamics[this.dynamics.length - 1],
+      startDynamics: this.dynamics[i],
+      endDynamics: this.dynamics[i + 1] ?? this.dynamics[i],
       startDistance,
       length,
       lut,
@@ -384,15 +397,36 @@ export class StrokePath {
   /**
    * Close the stroke: flush the provisional tail so the last samples are drawn.
    *
-   * Without this the final one or two knots never become a segment and the
-   * stroke visibly stops short of where the user lifted — the single most
-   * noticeable bug in an incremental stroke builder.
+   * Without this the final knot never becomes a segment and the stroke visibly
+   * stops short of where the user lifted — the single most noticeable bug in
+   * an incremental stroke builder. Two more cases are handled here:
+   *
+   *  - Input smoothing is a one-pole filter, so the last SMOOTHED knot trails
+   *    the pointer. The true last position is appended, so the stroke ends
+   *    where the pen lifted rather than a few pixels short of it.
+   *  - A stroke with a single knot (a tap) becomes one zero-length segment, so
+   *    it still emits its dot instead of leaving no mark at all.
    */
   finish(): void {
+    const raw = this.lastRaw;
+    const last = this.knots[this.knots.length - 1];
+    if (raw && last && Math.hypot(raw.x - last.x, raw.y - last.y) >= MIN_SAMPLE_DISTANCE) {
+      this.knots.push({ x: raw.x, y: raw.y });
+      this.dynamics.push({
+        pressure: clamp(raw.pressure, 0, 1),
+        tilt: raw.tilt,
+        twist: raw.twist,
+        speed: this.speed,
+        time: raw.time,
+        azimuth: raw.azimuth ?? 0,
+      });
+    }
+
     const k = this.knots.length;
-    if (k < 2) return;
+    if (k === 0) return;
     // Duplicate the terminal knot so the remaining spans become determinate.
-    while (this.segments.length < k - 1) {
+    const wanted = Math.max(1, k - 1);
+    while (this.segments.length < wanted) {
       this.segments.push(this.makeSegment(this.segments.length));
     }
   }
@@ -460,6 +494,8 @@ export class StrokePath {
       tilt: a.tilt + (b.tilt - a.tilt) * f,
       twist: a.twist + (b.twist - a.twist) * f,
       speed: a.speed + (b.speed - a.speed) * f,
+      time: a.time + (b.time - a.time) * f,
+      azimuth: a.azimuth + (b.azimuth - a.azimuth) * f,
     };
   }
 
