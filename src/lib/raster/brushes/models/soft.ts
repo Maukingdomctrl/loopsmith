@@ -46,9 +46,9 @@ const DENSITY_MAX = 3;
  *  leaves the middle of the range for "medium" (p = 0.5 lands near α = 0.4). */
 const DEPOSIT: PressureCurve = { from: 0, to: 1, gamma: 2, ease: 0.12 };
 
-/** Pressure → contact radius, as a fraction of the size. A firmer press widens
- *  the contact patch a little; density carries most of the response. */
-const CONTACT: PressureCurve = { from: 0.8, to: 1, gamma: 0.8 };
+/** Pressure → contact radius, as a fraction of the size. A light touch is a
+ *  narrow, faint mark; pressing opens the brush to its full size. */
+const CONTACT: PressureCurve = { from: 0.3, to: 1, gamma: 1 };
 
 /** Pressure → plateau (round). Zero at a light touch (pure bell). */
 const PLATEAU: PressureCurve = { from: 0, to: 0.2, gamma: 1.4 };
