@@ -9,6 +9,7 @@
 
 import type { Layer } from "@/types/layer";
 import { MAT_IDENTITY } from "@/lib/geometry/mat2d";
+import { loadBitmap } from "@/lib/layers/flatten";
 import { RasterSurface } from "@/lib/raster/surface";
 import { layerContentBox } from "@/lib/layers/layerSpace";
 import { renderStrokes } from "./render";
@@ -33,4 +34,33 @@ export function bakeStrokesIntoSurface(surface: RasterSurface, layer: Layer): vo
   });
   surface.data.set(RasterSurface.fromImageData(px, w, h).data);
   surface.dirty.add(0, 0, w, h);
+}
+
+/** The layer's pixels with its strokes rendered in, as a PNG data URL
+ *  (used when applying a mask). */
+export async function bakeLayerStrokes(layer: Layer): Promise<string | null> {
+  if (typeof document === "undefined") return null;
+  const w = Math.max(1, Math.round(layer.size.w));
+  const h = Math.max(1, Math.round(layer.size.h));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  if (layer.image) {
+    const img = await loadBitmap(layer.image).catch(() => null);
+    if (!img) return null;
+    ctx.drawImage(img, 0, 0);
+  }
+
+  const data = ctx.getImageData(0, 0, w, h);
+  renderStrokes(data, 0, 0, layer.strokes ?? [], {
+    matrix: MAT_IDENTITY,
+    surfaceW: w,
+    surfaceH: h,
+    clip: layerContentBox(layer),
+  });
+  ctx.putImageData(data, 0, 0);
+  return canvas.toDataURL("image/png");
 }

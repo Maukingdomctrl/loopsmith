@@ -16,6 +16,10 @@ interface Props {
   background: CanvasBackground;
   onChange: (next: CanvasBackground) => void;
   disabled?: boolean;
+  /** Strip the solid background baked into the frames' artwork. */
+  onRemoveArtBackground?: () => void;
+  removingArtBackground?: boolean;
+  artBackgroundNotice?: string | null;
 }
 
 const SWATCHES = [
@@ -31,7 +35,9 @@ const SWATCHES = [
 const ring = (active: boolean) =>
   active ? "ring-2 ring-indigo-400 ring-offset-2 ring-offset-[#141821]" : "ring-1 ring-white/15";
 
-export default function TransparencyToggle({ background, onChange, disabled }: Props) {
+export default function TransparencyToggle({
+  background, onChange, disabled, onRemoveArtBackground, removingArtBackground, artBackgroundNotice,
+}: Props) {
   const isPreset = SWATCHES.some(
     (s) => !background.transparent && s.color.toLowerCase() === background.color.toLowerCase()
   );
@@ -113,6 +119,22 @@ export default function TransparencyToggle({ background, onChange, disabled }: P
           ? "Exports with a transparent background. The checkerboard is only a preview."
           : "Exports on this colour. Edges blend smoothly: best quality for GIFs."}
       </p>
+
+      {onRemoveArtBackground && (
+        <>
+          <button
+            onClick={onRemoveArtBackground}
+            disabled={disabled || removingArtBackground}
+            title="Remove the solid colour baked into the frames (e.g. the sheet they were cut from), so it no longer moves with the artwork"
+            className="w-full rounded bg-zinc-800 px-2 py-1.5 text-[11px] text-zinc-200 hover:bg-zinc-700 disabled:opacity-40"
+          >
+            {removingArtBackground ? "Removing…" : "Remove background from art"}
+          </button>
+          {artBackgroundNotice && (
+            <p className="text-[10px] leading-snug text-zinc-400">{artBackgroundNotice}</p>
+          )}
+        </>
+      )}
     </div>
   );
 }

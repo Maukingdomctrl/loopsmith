@@ -684,6 +684,14 @@ export function renderStrokes(
         if (opts.clip && !inClip(gx, gy)) continue;
         const p = ((gy - oy) * target.width + (gx - ox)) * 4;
         const A = d[p + 3] / 255;
+        if (stroke.lockAlpha) {
+          // Alpha lock: tint what is there, keep its alpha.
+          if (erase || A <= 0) continue;
+          d[p] = Math.round(cr * 255 * a + d[p] * (1 - a));
+          d[p + 1] = Math.round(cg * 255 * a + d[p + 1] * (1 - a));
+          d[p + 2] = Math.round(cb * 255 * a + d[p + 2] * (1 - a));
+          continue;
+        }
         if (erase) {
           d[p + 3] = Math.round(A * (1 - a) * 255);
           continue;

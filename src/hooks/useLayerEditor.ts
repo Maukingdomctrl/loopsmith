@@ -168,10 +168,24 @@ const layerIds = useMemo(
   [frame.layers]
 );
 
+const seenLayersRef = useRef<{ frameId: string; ids: string } | null>(null);
+
 useEffect(() => {
   const key = `${frame.id}:${frame.activeLayerId}:${layerIds}`;
   if (syncKeyRef.current === key) return;
   syncKeyRef.current = key;
+
+  // A layer just added to this frame is where the next edit goes: select it.
+  const seen = seenLayersRef.current;
+  seenLayersRef.current = { frameId: frame.id, ids: layerIds };
+  if (
+    seen?.frameId === frame.id &&
+    !seen.ids.split("|").includes(frame.activeLayerId) &&
+    frame.layers.some((l) => l.id === frame.activeLayerId)
+  ) {
+    setSelection(selectOnly(frame.activeLayerId));
+    return;
+  }
 
   setSelection((prev) => {
     const next = reduceSelectionForFrame(frame, prev);

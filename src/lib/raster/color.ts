@@ -123,6 +123,7 @@ function blendChannel(mode: BlendMode, cb: number, cs: number): number {
     case "multiply":   return cb * cs;
     case "screen":     return cb + cs - cb * cs;
     case "overlay":    return cb <= 0.5 ? 2 * cb * cs : 1 - 2 * (1 - cb) * (1 - cs);
+    case "color-dodge": return cb <= 0 ? 0 : cs >= 1 ? 1 : Math.min(1, cb / (1 - cs));
     case "darken":     return Math.min(cb, cs);
     case "lighten":    return Math.max(cb, cs);
     case "difference": return Math.abs(cb - cs);

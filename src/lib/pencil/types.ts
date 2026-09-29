@@ -38,6 +38,10 @@ export interface PencilStroke {
   readonly material?: string;
   /** Ink only: the brush's opacity slider, 0..1. */
   readonly opacity?: number;
+  /** Drawn with the layer's alpha lock on: graphite only recolours pixels
+   *  already there, never adds or removes alpha. Recorded per stroke so
+   *  toggling the lock later does not change strokes already drawn. */
+  readonly lockAlpha?: boolean;
   /** Flat samples, PENCIL_STRIDE numbers each. */
   readonly pts: readonly number[];
 }

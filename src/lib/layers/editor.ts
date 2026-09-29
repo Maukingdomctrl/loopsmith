@@ -15,7 +15,8 @@
 
 import type { Rect, Vec2 } from "@/types/geometry";
 import type { Frame } from "@/types/frame";
-import type { BlendMode, Layer, LayerSelection } from "@/types/layer";
+import type { Adjustment, BlendMode, Layer, LayerMask, LayerSelection } from "@/types/layer";
+import { BLANK_LAYER_SIZE } from "./constants";
 import { EMPTY_SELECTION } from "@/types/layer";
 import { clearTransforms } from "@/lib/frameTransform";
 import {
@@ -68,11 +69,19 @@ import {
 } from "./crop";
 import { attachLayerSize, syncBaseFromLegacy } from "./migrate";
 import { defaultFitPose } from "./layerSpace";
+import { makePose } from "@/lib/geometry/pose";
 import { pruneSelection, selectOnly } from "./selection";
 
 export type LayerAction =
   /* structure */
-  | { type: "layer/add"; image: string | null; size: { w: number; h: number }; name?: string }
+  | {
+      type: "layer/add";
+      image: string | null;
+      size: { w: number; h: number };
+      name?: string;
+      linkId?: string;
+      adjust?: Adjustment;
+    }
   | { type: "layer/duplicate"; id: string }
   | { type: "layer/remove"; id: string }
   | { type: "layer/move"; id: string; to: number }
@@ -86,6 +95,14 @@ export type LayerAction =
   | { type: "layer/locked"; id: string; value: boolean }
   | { type: "layer/opacity"; id: string; value: number }
   | { type: "layer/blend"; id: string; value: BlendMode }
+  | { type: "layer/alphaLock"; id: string; value: boolean }
+  | { type: "layer/clip"; id: string; value: boolean }
+  | { type: "layer/adjust"; id: string; value: Adjustment }
+  | { type: "layer/maskAdd"; id: string; hideAll?: boolean }
+  | { type: "layer/maskSet"; id: string; patch: Partial<Pick<LayerMask, "inverted" | "enabled">> }
+  | { type: "layer/maskDelete"; id: string }
+  /** Apply Mask: `image` is the layer's pixels with the mask baked in. */
+  | { type: "layer/maskApplied"; id: string; image: string }
   | { type: "layer/setImage"; id: string; image: string; size: { w: number; h: number } }
   | { type: "layer/sizeKnown"; id: string; width: number; height: number }
   | { type: "layer/setActive"; id: string }
@@ -144,12 +161,17 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
   switch (action.type) {
     /* ---- structure ---- */
     case "layer/add": {
-      const layer = createLayer({
+      const created = createLayer({
         image: action.image,
         size: action.size,
         name: action.name ?? `Layer ${layers.length}`,
         pose: defaultFitPose(action.size.w, action.size.h),
       });
+      const layer = {
+        ...created,
+        ...(action.linkId && { linkId: action.linkId }),
+        ...(action.adjust && { adjust: action.adjust }),
+      };
       next = addLayer(layers, layer, frame.activeLayerId);
       activeLayerId = layer.id;
       break;
@@ -178,6 +200,35 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
     case "layer/locked":  next = setLayerLocked(layers, action.id, action.value); break;
     case "layer/opacity": next = setLayerOpacity(layers, action.id, action.value); break;
     case "layer/blend":   next = updateLayer(layers, action.id, { blend: action.value }); break;
+    case "layer/alphaLock": next = updateLayer(layers, action.id, { alphaLock: action.value }); break;
+    case "layer/clip":      next = updateLayer(layers, action.id, { clip: action.value }); break;
+    case "layer/adjust":    next = updateLayer(layers, action.id, { adjust: action.value }); break;
+    case "layer/maskAdd": {
+      const l = findLayer(layers, action.id);
+      if (!l || l.mask) break;
+      const mask: LayerMask = {
+        image: null, fill: action.hideAll ? 0 : 255, inverted: false, enabled: true,
+      };
+      // A layer with no size yet (an adjustment layer, an empty sheet) gets a
+      // canvas-sized one, so its mask has pixels to paint.
+      const sheet = l.size.w <= 0 || l.size.h <= 0
+        ? {
+            size: { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE },
+            pose: makePose(defaultFitPose(BLANK_LAYER_SIZE, BLANK_LAYER_SIZE)),
+          }
+        : {};
+      next = updateLayer(layers, action.id, { mask, ...sheet });
+      break;
+    }
+    case "layer/maskSet": {
+      const l = findLayer(layers, action.id);
+      if (l?.mask) next = updateLayer(layers, action.id, { mask: { ...l.mask, ...action.patch } });
+      break;
+    }
+    case "layer/maskDelete": next = updateLayer(layers, action.id, { mask: undefined }); break;
+    case "layer/maskApplied":
+      next = updateLayer(layers, action.id, { image: action.image, strokes: [], mask: undefined });
+      break;
 
     case "layer/setImage": {
   const existing = findLayer(layers, action.id);

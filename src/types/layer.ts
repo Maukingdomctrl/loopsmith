@@ -23,23 +23,91 @@ export type BlendMode =
   | "multiply"
   | "screen"
   | "overlay"
+  | "color-dodge"
   | "darken"
   | "lighten"
   | "difference";
 
 export const BLEND_MODES: readonly BlendMode[] = [
-  "normal", "multiply", "screen", "overlay", "darken", "lighten", "difference",
+  "normal", "multiply", "screen", "overlay", "color-dodge", "darken", "lighten", "difference",
 ];
+
+export const BLEND_LABELS: Readonly<Record<BlendMode, string>> = {
+  normal: "Normal",
+  multiply: "Multiply",
+  screen: "Screen",
+  overlay: "Overlay",
+  "color-dodge": "Color Dodge",
+  darken: "Darken",
+  lighten: "Lighten",
+  difference: "Difference",
+};
 
 export const BLEND_TO_COMPOSITE: Readonly<Record<BlendMode, GlobalCompositeOperation>> = {
   normal: "source-over",
   multiply: "multiply",
   screen: "screen",
   overlay: "overlay",
+  "color-dodge": "color-dodge",
   darken: "darken",
   lighten: "lighten",
   difference: "difference",
 };
+
+/** Cyan–Red, Magenta–Green, Yellow–Blue, each −100..100. */
+export type ColorBalanceTone = readonly [number, number, number];
+
+export type Adjustment =
+  | {
+      readonly type: "brightnessContrast";
+      readonly brightness: number; // −100..100
+      readonly contrast: number;   // −100..100
+    }
+  | {
+      readonly type: "hueSaturation";
+      readonly hue: number;        // −180..180
+      readonly saturation: number; // −100..100
+      readonly lightness: number;  // −100..100
+    }
+  | {
+      readonly type: "colorBalance";
+      readonly shadows: ColorBalanceTone;
+      readonly midtones: ColorBalanceTone;
+      readonly highlights: ColorBalanceTone;
+    };
+
+export type AdjustmentType = Adjustment["type"];
+
+export const ADJUSTMENT_LABELS: Readonly<Record<AdjustmentType, string>> = {
+  brightnessContrast: "Brightness/Contrast",
+  hueSaturation: "Hue/Saturation",
+  colorBalance: "Color Balance",
+};
+
+export function defaultAdjustment(type: AdjustmentType): Adjustment {
+  switch (type) {
+    case "brightnessContrast": return { type, brightness: 0, contrast: 0 };
+    case "hueSaturation":      return { type, hue: 0, saturation: 0, lightness: 0 };
+    case "colorBalance":
+      return { type, shadows: [0, 0, 0], midtones: [0, 0, 0], highlights: [0, 0, 0] };
+  }
+}
+
+/**
+ * A layer mask, as in Photoshop: white shows the layer, black hides it, grey
+ * is partial. Pixels live in the layer's own space (so the mask moves with the
+ * layer), at the layer's size.
+ */
+export interface LayerMask {
+  /** Greyscale PNG. null = a solid mask of `fill` (no pixels painted yet). */
+  readonly image: string | null;
+  /** Colour of a mask with no image: 255 reveals all, 0 hides all. */
+  readonly fill: 0 | 255;
+  /** Show where it is black instead (Invert). */
+  readonly inverted: boolean;
+  /** Off = the layer draws as if it had no mask. */
+  readonly enabled: boolean;
+}
 
 export interface Layer {
   readonly id: string;
@@ -65,6 +133,19 @@ export interface Layer {
   readonly visible: boolean;
   readonly locked: boolean;
   readonly blend: BlendMode;
+  /** Lock transparent pixels: paint only recolours pixels the layer already
+   *  has, so it never spills outside the shape and never changes alpha. */
+  readonly alphaLock?: boolean;
+  /** Shared by the copies of one layer across frames (made by "new blank
+   *  layer on every frame"): blend and alpha lock changes apply to all. */
+  readonly linkId?: string;
+  /** Clipping mask: drawn only where the nearest unclipped layer below has
+   *  pixels, and shares that layer's opacity and blend. */
+  readonly clip?: boolean;
+  /** Adjustment layer: no pixels of its own; recolours everything below it
+   *  (or, when clipped, only its clipping group). Opacity is its strength. */
+  readonly adjust?: Adjustment;
+  readonly mask?: LayerMask;
 
   /** Pencil strokes, stored as recorded physics in layer space and drawn over
    *  `image` analytically at render time. Never baked unless a pixel tool

@@ -53,6 +53,9 @@ import {
 import { loadHistory, saveHistory, clearHistory } from "@/lib/history";
 import type { Snapshot } from "@/types/history";
 import { layerReducer, type LayerAction } from "@/lib/layers/editor";
+import { BLANK_LAYER_SIZE } from "@/lib/layers/constants";
+import { applyMaskToPixels } from "@/lib/layers/maskOps";
+import { removeFrameBackground } from "@/lib/sprite/removeBackground";
 import {
   createBlankFrame,
   duplicateFrame,
@@ -66,8 +69,8 @@ import { defaultFitPose } from "@/lib/layers/layerSpace";
 import { clearTransforms } from "@/lib/frameTransform";
 /* ---------- layer system ---------- */
 
-import type { CanvasBackground } from "@/types/layer";
-import { DEFAULT_BACKGROUND } from "@/types/layer";
+import type { AdjustmentType, CanvasBackground } from "@/types/layer";
+import { ADJUSTMENT_LABELS, DEFAULT_BACKGROUND, defaultAdjustment } from "@/types/layer";
 import { useLayerEditor } from "@/hooks/useLayerEditor";
 import {
   attachLayerSize,
@@ -86,7 +89,7 @@ import {
   preloadFrameBitmaps,
   reflattenIfStale,
 } from "@/lib/layers/flatten";
-import { findLayer } from "@/lib/layers/layerOps";
+import { createLayerId, findLayer } from "@/lib/layers/layerOps";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
 
 /**
@@ -114,6 +117,8 @@ export default function Home() {
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectionActive, setSelectionActive] = useState(false);
+  /** Paint tools target the selected layer's mask (its thumbnail is picked). */
+  const [editMask, setEditMask] = useState(false);
   const [previewFrame, setPreviewFrame] = useState(0);
   const [onionSkin, setOnionSkin] = useState(true);
   const [showProjects, setShowProjects] = useState(false);
@@ -667,7 +672,9 @@ const frames = activeProject?.frames.length
       const el = e.target as HTMLElement | null;
       if (
         el &&
-        (el.tagName === "INPUT" ||
+        ((el.tagName === "INPUT" &&
+          // A slider keeps focus after a drag; undo must still work there.
+          (el as HTMLInputElement).type !== "range") ||
           el.tagName === "TEXTAREA" ||
           el.isContentEditable)
       ) {
@@ -677,6 +684,11 @@ const frames = activeProject?.frames.length
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
 
       const key = e.key.toLowerCase();
+
+      if (key === "i" && !e.shiftKey) {
+        if (invertMaskShortcut.current()) e.preventDefault();
+        return;
+      }
 
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
@@ -877,6 +889,70 @@ const frames = activeProject?.frames.length
   );
 
   /**
+   * Remove the solid background baked into every frame's artwork (the colour
+   * of the sheet it was cut from) and make that colour the canvas background.
+   * The look is unchanged, but the colour no longer moves with the artwork,
+   * and choosing Transparent afterwards removes it entirely. One undo step.
+   */
+  const [removingArtBg, setRemovingArtBg] = useState(false);
+  const [artBgNotice, setArtBgNotice] = useState<string | null>(null);
+  const removeArtBackground = async () => {
+    const project = projectsRef.current.find((p) => p.id === activeProjectId);
+    if (!project || removingArtBg) return;
+    setRemovingArtBg(true);
+    setArtBgNotice(null);
+    try {
+      const results = new Map<string, { layerId: string; image: string }>();
+      const colours = new Map<number, number>();
+      for (const f of project.frames) {
+        const base = f.layers.find((l) => l.kind === "base");
+        if (!base?.image) continue;
+        const img = await loadBitmap(base.image).catch(() => null);
+        if (!img) continue;
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        const ctx = c.getContext("2d", { willReadFrequently: true });
+        if (!ctx) continue;
+        ctx.drawImage(img, 0, 0);
+        const out = removeFrameBackground(ctx.getImageData(0, 0, c.width, c.height));
+        if (!out) continue;
+        ctx.putImageData(out.image, 0, 0);
+        results.set(f.id, { layerId: base.id, image: c.toDataURL("image/png") });
+        colours.set(out.background, (colours.get(out.background) ?? 0) + 1);
+      }
+      if (!results.size) {
+        setArtBgNotice("No solid background colour found in the frames.");
+        return;
+      }
+      // Decode first, so the canvas never shows a frame without its artwork.
+      await Promise.all([...results.values()].map((r) => loadBitmap(r.image).catch(() => null)));
+      const [colour] = [...colours].sort((a, b) => b[1] - a[1])[0];
+      const hex = `#${colour.toString(16).padStart(6, "0")}`;
+      updateProject((p) => ({
+        ...p,
+        background: { ...p.background, transparent: false, color: hex },
+        frames: p.frames.map((f) => {
+          const r = results.get(f.id);
+          return r
+            ? {
+                ...f,
+                layers: f.layers.map((l) => (l.id === r.layerId ? { ...l, image: r.image } : l)),
+                flattenKey: null,
+              }
+            : f;
+        }),
+      }));
+      setArtBgNotice(
+        `Removed from ${results.size} frame${results.size === 1 ? "" : "s"}. ` +
+          "The colour is now a steady background; pick Transparent to remove it."
+      );
+    } finally {
+      setRemovingArtBg(false);
+    }
+  };
+
+  /**
    * Clear the active layer's pixels.
    *
    * Written here rather than as a reducer action because it is the legacy
@@ -926,6 +1002,137 @@ const frames = activeProject?.frames.length
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(file);
     });
+
+  /** One blank layer on every frame, same name everywhere; one undo step.
+   *  Frames already at the layer limit are left as they are. */
+  const addBlankLayerAllFrames = () => {
+    const name = `Layer ${editFrame.layers.length}`;
+    const size = { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE };
+    const linkId = createLayerId();
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f) =>
+        layerReducer(f, { type: "layer/add", image: null, size, name, linkId })
+      ),
+    }));
+  };
+
+  /** An adjustment layer recolours the whole animation, so it goes on every
+   *  frame, linked, as one undo step. */
+  const addAdjustmentLayer = (type: AdjustmentType) => {
+    const linkId = createLayerId();
+    const adjust = defaultAdjustment(type);
+    const name = ADJUSTMENT_LABELS[type];
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f) =>
+        layerReducer(f, { type: "layer/add", image: null, size: { w: 0, h: 0 }, name, linkId, adjust })
+      ),
+    }));
+  };
+
+  /** Apply `fn` to the project without an undo step: slider drags push theirs
+   *  once, when the drag starts (`onBeginEdit`). */
+  const updateProjectQuiet = (fn: (p: Project) => Project) => {
+    setIsPlaying(false);
+    setProjects((prev) => {
+      const next = prev.map((p) =>
+        p.id === activeProjectId ? updateProjectTimestamp(fn(p)) : p
+      );
+      projectsRef.current = next;
+      return next;
+    });
+  };
+
+  /**
+   * Layer panel edits. Settings of a layer that has linked copies on other
+   * frames (blend, alpha lock, clipping, opacity, adjustment) change every
+   * copy. Toggles are one undo step each; slider drags one per drag.
+   */
+  const dispatchLayerPanel = (action: LayerAction) => {
+    // A new mask is where painting goes next, as in Photoshop.
+    if (action.type === "layer/maskAdd") setEditMask(true);
+    if (action.type === "layer/maskDelete") setEditMask(false);
+    const linked =
+      action.type === "layer/maskAdd" ||
+      action.type === "layer/maskSet" ||
+      action.type === "layer/maskDelete" ||
+      action.type === "layer/blend" ||
+      action.type === "layer/alphaLock" ||
+      action.type === "layer/clip" ||
+      action.type === "layer/opacity" ||
+      action.type === "layer/adjust";
+    if (!linked || isPlaying || selectionActive) {
+      editor.dispatch(action);
+      return;
+    }
+    const layer = editFrame.layers.find((l) => l.id === action.id);
+    const linkId = layer?.linkId;
+    // Adjustment sliders always come here, so their undo is per drag.
+    if (!layer || (!linkId && action.type !== "layer/adjust")) {
+      editor.dispatch(action);
+      return;
+    }
+    const apply = (project: Project): Project => ({
+      ...project,
+      frames: project.frames.map((f) => {
+        const twin = linkId
+          ? f.layers.find((l) => l.linkId === linkId)
+          : f.id === editFrame.id ? layer : undefined;
+        return twin ? layerReducer(f, { ...action, id: twin.id }) : f;
+      }),
+    });
+    if (action.type === "layer/opacity" || action.type === "layer/adjust") updateProjectQuiet(apply);
+    else updateProject(apply);
+  };
+
+  /** Apply Mask: bake the mask into the layer's pixels (every linked copy,
+   *  each with its own mask) as one undo step. */
+  const applyingMask = useRef(false);
+  const applyLayerMask = async (id: string) => {
+    const layer = editFrame.layers.find((l) => l.id === id);
+    if (!layer?.mask || layer.adjust || applyingMask.current) return;
+    const project = projectsRef.current.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    applyingMask.current = true;
+    try {
+      const targets = project.frames
+        .map((f) => ({
+          frameId: f.id,
+          twin: layer.linkId
+            ? f.layers.find((l) => l.linkId === layer.linkId)
+            : f.id === editFrame.id ? f.layers.find((l) => l.id === id) : undefined,
+        }))
+        .filter((t) => t.twin?.mask);
+      const baked = new Map<string, { id: string; image: string }>();
+      for (const t of targets) {
+        const image = await applyMaskToPixels(t.twin!);
+        if (!image) return; // a decode failed: change nothing
+        baked.set(t.frameId, { id: t.twin!.id, image });
+      }
+      // Decode before swapping in, so the canvas never shows the layer blank.
+      await Promise.all([...baked.values()].map((b) => loadBitmap(b.image).catch(() => null)));
+      setEditMask(false);
+      updateProject((p) => ({
+        ...p,
+        frames: p.frames.map((f) => {
+          const b = baked.get(f.id);
+          return b ? layerReducer(f, { type: "layer/maskApplied", id: b.id, image: b.image }) : f;
+        }),
+      }));
+    } finally {
+      applyingMask.current = false;
+    }
+  };
+
+  /** Ctrl+I: invert the targeted mask. */
+  const invertMaskShortcut = useRef<() => boolean>(() => false);
+  invertMaskShortcut.current = () => {
+    const l = editFrame.layers.find((x) => x.id === editor.primary?.id);
+    if (!editMask || !l?.mask || l.locked || isPlaying || selectionActive) return false;
+    dispatchLayerPanel({ type: "layer/maskSet", id: l.id, patch: { inverted: !l.mask.inverted } });
+    return true;
+  };
 
   const handleImport = (file: File) => {
   setIsPlaying(false);
@@ -1097,6 +1304,7 @@ const deleteProject = useCallback(
 
         <Canvas
           projectId={activeProject?.id ?? ""}
+          editMask={editMask}
           containerRef={canvasContainerRef}
           background={background}
           transparency={transparency}
@@ -1138,10 +1346,16 @@ const deleteProject = useCallback(
             selection={editor.selection}
             disabled={isPlaying || selectionActive}
             onSelect={editor.select}
-            dispatch={editor.dispatch}
+            dispatch={dispatchLayerPanel}
             onAddImage={() =>
               openPicker({ kind: "new-layer", frame: editingIndex })
             }
+            onAddBlankAllFrames={addBlankLayerAllFrames}
+            onAddAdjustment={addAdjustmentLayer}
+            editMask={editMask}
+            onEditMaskChange={setEditMask}
+            onApplyMask={applyLayerMask}
+            onBeginEdit={handleHistoryCommit}
           />
         )}
 
@@ -1191,6 +1405,9 @@ const deleteProject = useCallback(
             background={background}
             onChange={handleBackgroundChange}
             disabled={isPlaying}
+            onRemoveArtBackground={removeArtBackground}
+            removingArtBackground={removingArtBg}
+            artBackgroundNotice={artBgNotice}
           />
         </RightSidebar>
       </section>
