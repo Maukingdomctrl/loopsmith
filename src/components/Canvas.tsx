@@ -132,8 +132,11 @@ interface CanvasProps {
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 8;
 const SAVE_DEBOUNCE_MS = 500;
-/** Size of a fresh drawing sheet on an empty frame. */
-const BLANK_SIZE = 512;
+/**
+ * Size of a fresh drawing sheet on an empty frame. Shown at the same size on
+ * screen as before, but with twice the pixels so brush lines stay clean when zoomed.
+ */
+const BLANK_SIZE = 1024;
 /** Pressure used for a mouse, which reports none. */
 const MOUSE_PRESSURE = 0.62;
 
@@ -365,14 +368,19 @@ const commit = useCallback((next: Frame) => {
   const pendingImageRef = useRef<string | null>(null);
   const previewRaf = useRef(0);
 
-  // Tools need a sheet: an empty base layer becomes a 512×512 page. Fill needs
+  // Tools need a sheet: an empty base layer becomes a blank page. Fill needs
   // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
     if (!base) return;
 
     if (!base.image && !base.strokes?.length) {
-      if (base.size.w !== BLANK_SIZE || base.size.h !== BLANK_SIZE) {
+      // Match the previous frame's sheet when it has artwork: auto stabilize
+      // needs every frame the same size.
+      const prev = previousFrame?.layers.find((l) => l.image || l.strokes?.length);
+      const w = prev ? Math.round(prev.size.w) : BLANK_SIZE;
+      const h = prev ? Math.round(prev.size.h) : BLANK_SIZE;
+      if (base.size.w !== w || base.size.h !== h) {
         const f = editRef.current;
         commit({
           ...f,
@@ -380,8 +388,8 @@ const commit = useCallback((next: Frame) => {
             l.id === base.id
               ? {
                   ...l,
-                  size: { w: BLANK_SIZE, h: BLANK_SIZE },
-                  pose: makePose(defaultFitPose(BLANK_SIZE, BLANK_SIZE)),
+                  size: { w, h },
+                  pose: makePose(defaultFitPose(w, h)),
                 }
               : l
           ),
@@ -418,11 +426,11 @@ const commit = useCallback((next: Frame) => {
 
     // Blank sheet: a transparent surface of the layer's size.
     if (!base.image) {
-      if (surfaceRef.current && surfaceSrc.current === null) return;
-      surfaceRef.current = new RasterSurface(
-        Math.max(1, Math.round(base.size.w)),
-        Math.max(1, Math.round(base.size.h))
-      );
+      const w = Math.max(1, Math.round(base.size.w));
+      const h = Math.max(1, Math.round(base.size.h));
+      const cur = surfaceRef.current;
+      if (cur && surfaceSrc.current === null && cur.width === w && cur.height === h) return;
+      surfaceRef.current = new RasterSurface(w, h);
       surfaceSrc.current = null;
       return;
     }
@@ -442,7 +450,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, base, commit]);
+  }, [activeTool, base, commit, previousFrame]);
 
   /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
   const toLocal = useCallback((cx: number, cy: number) => {
@@ -508,7 +516,8 @@ const commit = useCallback((next: Frame) => {
       if (!m) return;
       ctx.save();
       ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-      ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
       ctx.drawImage(scratch, 0, 0);
       ctx.restore();
       return;
@@ -1102,6 +1111,7 @@ const commit = useCallback((next: Frame) => {
     resolve: domResolver(),
     checkerboard: true,
     interactive: true,
+    smoothing: true,
   });
 
   // NEW — apply transparency mask
