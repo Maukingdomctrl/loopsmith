@@ -205,6 +205,8 @@ const dispatch = useCallback(
       }
       onCommit(next, { undoable });
       frameRef.current = next;
+      // A new layer is where the next edit goes: select it.
+      if (action.type === "layer/add") setSelection(selectOnly(next.activeLayerId));
     },
     [disabled, onBeginHistory, onCommit]
   );

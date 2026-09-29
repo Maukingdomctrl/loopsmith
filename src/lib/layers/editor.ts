@@ -86,6 +86,7 @@ export type LayerAction =
   | { type: "layer/locked"; id: string; value: boolean }
   | { type: "layer/opacity"; id: string; value: number }
   | { type: "layer/blend"; id: string; value: BlendMode }
+  | { type: "layer/alphaLock"; id: string; value: boolean }
   | { type: "layer/setImage"; id: string; image: string; size: { w: number; h: number } }
   | { type: "layer/sizeKnown"; id: string; width: number; height: number }
   | { type: "layer/setActive"; id: string }
@@ -178,6 +179,7 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
     case "layer/locked":  next = setLayerLocked(layers, action.id, action.value); break;
     case "layer/opacity": next = setLayerOpacity(layers, action.id, action.value); break;
     case "layer/blend":   next = updateLayer(layers, action.id, { blend: action.value }); break;
+    case "layer/alphaLock": next = updateLayer(layers, action.id, { alphaLock: action.value }); break;
 
     case "layer/setImage": {
   const existing = findLayer(layers, action.id);

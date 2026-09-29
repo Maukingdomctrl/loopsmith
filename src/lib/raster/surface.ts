@@ -500,6 +500,32 @@ export class RasterSurface {
     this.dirty.addRect(bounds);
   }
 
+  /**
+   * Alpha lock: put back the alpha each pixel had in `before` (a copy of
+   * `data` taken before painting), keeping the new colour. Paint then only
+   * recolours pixels that were already there — transparent stays transparent.
+   */
+  keepAlpha(before: Float32Array, region: Rect): void {
+    const r = this.clipRect(region);
+    if (rectIsEmpty(r)) return;
+    for (let y = r.y; y < r.y + r.h; y++) {
+      let i = this.index(r.x, y);
+      for (let x = r.x; x < r.x + r.w; x++, i += CHANNELS) {
+        const a0 = before[i + 3];
+        const a1 = this.data[i + 3];
+        if (a0 <= 0 || a1 <= 0) {
+          this.data[i] = this.data[i + 1] = this.data[i + 2] = this.data[i + 3] = 0;
+          continue;
+        }
+        if (a0 === a1) continue;
+        const k = a0 / a1;
+        this.data[i] *= k; this.data[i + 1] *= k;
+        this.data[i + 2] *= k; this.data[i + 3] = a0;
+      }
+    }
+    this.dirty.addRect(r);
+  }
+
   /** Keep only what the coverage covers — `destination-in`, for clipping. */
   maskCoverage(coverage: CoverageBuffer): void {
     for (let y = 0; y < this.height; y++) {
