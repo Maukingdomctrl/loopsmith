@@ -42,7 +42,7 @@ const MATERIALS: Record<string, HardMaterial> = {
   // at a whisper to full width; a light touch is also a lighter line
   pen: {
     width: { from: 0.07, to: 1, gamma: 0.9 },
-    opacity: { from: 0.4, to: 1, gamma: 0.7 },
+    opacity: { from: 0.15, to: 1, gamma: 0.75 },
     grain: 0,
   },
   // sharp graphite: pressure changes width AND how much lead is laid down
@@ -55,7 +55,7 @@ const MATERIALS: Record<string, HardMaterial> = {
   // light strokes come out soft grey, pressed ones solid
   ink: {
     width: { from: 0.035, to: 1, gamma: 1.6, ease: 0.3 },
-    opacity: { from: 0.35, to: 1, gamma: 0.8 },
+    opacity: { from: 0.15, to: 1, gamma: 0.8 },
     grain: 0,
   },
 };

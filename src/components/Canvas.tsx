@@ -137,6 +137,18 @@ const BLANK_SIZE = 512;
 /** Pressure used for a mouse, which reports none. */
 const MOUSE_PRESSURE = 0.62;
 
+/**
+ * Whether this pointer reports real pressure. A pen always does. Many styluses
+ * (Android tablets, some Windows pens) arrive as "touch" but still send real
+ * pressure; a finger or a device without pressure sends 0, 0.5 or 1.
+ */
+function reportsPressure(e: Pick<PointerEvent, "pointerType" | "pressure">): boolean {
+  if (e.pointerType === "pen") return true;
+  return (
+    e.pointerType === "touch" && e.pressure > 0 && e.pressure < 1 && e.pressure !== 0.5
+  );
+}
+
 /** Size slider: continuous and logarithmic, so small sizes get most of the
  *  travel. 0…1000 ↔ PENCIL_MIN_SIZE…PENCIL_MAX_SIZE. */
 const SIZE_SPAN = Math.log(PENCIL_MAX_SIZE / PENCIL_MIN_SIZE);
@@ -574,7 +586,7 @@ const commit = useCallback((next: Frame) => {
     return {
       x: local.x,
       y: local.y,
-      pressure: normalizePressure(e.pressure, e.pointerType === "pen"),
+      pressure: normalizePressure(e.pressure, reportsPressure(e)),
       tilt: Math.atan(Math.hypot(tx, ty)),
       azimuth: Math.atan2(ty, tx),
       twist: ((e.twist || 0) * Math.PI) / 180,
@@ -689,8 +701,9 @@ const commit = useCallback((next: Frame) => {
         intensity: brushNow.intensity,
         material: brushNow.material,
         angle: (brushNow.angle * Math.PI) / 180,
-        // only a pen has real pressure; a mouse or finger gets the brush's own stand-in
-        hasPressure: e.pointerType === "pen",
+        // a pen (or a stylus the browser calls "touch") has real pressure;
+        // a mouse or finger gets the brush's own stand-in
+        hasPressure: reportsPressure(e),
         scale,
       });
       strokeRef.current.addSample(pointSample(e, local));
