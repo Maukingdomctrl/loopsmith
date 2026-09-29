@@ -1,6 +1,8 @@
 export const MAX_LAYERS_PER_FRAME = 64;
 export const BASE_LAYER_NAME = "Base";
 export const LAYER_NAME_MAX = 64;
+/** Sheet size of a new blank layer (the paint tools' blank page size). */
+export const BLANK_LAYER_SIZE = 512;
 
 /** Handle sizes in canvas px (canvas is a fixed 512 square, so these are
  *  resolution-independent). */

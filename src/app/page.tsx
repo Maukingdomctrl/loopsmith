@@ -53,6 +53,7 @@ import {
 import { loadHistory, saveHistory, clearHistory } from "@/lib/history";
 import type { Snapshot } from "@/types/history";
 import { layerReducer, type LayerAction } from "@/lib/layers/editor";
+import { BLANK_LAYER_SIZE } from "@/lib/layers/constants";
 import {
   createBlankFrame,
   duplicateFrame,
@@ -86,7 +87,7 @@ import {
   preloadFrameBitmaps,
   reflattenIfStale,
 } from "@/lib/layers/flatten";
-import { findLayer } from "@/lib/layers/layerOps";
+import { createLayerId, findLayer } from "@/lib/layers/layerOps";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
 
 /**
@@ -927,6 +928,39 @@ const frames = activeProject?.frames.length
       reader.readAsDataURL(file);
     });
 
+  /** One blank layer on every frame, same name everywhere; one undo step.
+   *  Frames already at the layer limit are left as they are. */
+  const addBlankLayerAllFrames = () => {
+    const name = `Layer ${editFrame.layers.length}`;
+    const size = { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE };
+    const linkId = createLayerId();
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f) =>
+        layerReducer(f, { type: "layer/add", image: null, size, name, linkId })
+      ),
+    }));
+  };
+
+  /** Layer panel edits. Blend and alpha lock on a layer that has copies on
+   *  other frames change every copy, as one undo step. */
+  const dispatchLayerPanel = (action: LayerAction) => {
+    if (action.type === "layer/blend" || action.type === "layer/alphaLock") {
+      const linkId = editFrame.layers.find((l) => l.id === action.id)?.linkId;
+      if (linkId && !isPlaying && !selectionActive) {
+        updateProject((project) => ({
+          ...project,
+          frames: project.frames.map((f) => {
+            const twin = f.layers.find((l) => l.linkId === linkId);
+            return twin ? layerReducer(f, { ...action, id: twin.id }) : f;
+          }),
+        }));
+        return;
+      }
+    }
+    editor.dispatch(action);
+  };
+
   const handleImport = (file: File) => {
   setIsPlaying(false);
 
@@ -1138,10 +1172,11 @@ const deleteProject = useCallback(
             selection={editor.selection}
             disabled={isPlaying || selectionActive}
             onSelect={editor.select}
-            dispatch={editor.dispatch}
+            dispatch={dispatchLayerPanel}
             onAddImage={() =>
               openPicker({ kind: "new-layer", frame: editingIndex })
             }
+            onAddBlankAllFrames={addBlankLayerAllFrames}
           />
         )}
 

@@ -72,7 +72,7 @@ import { pruneSelection, selectOnly } from "./selection";
 
 export type LayerAction =
   /* structure */
-  | { type: "layer/add"; image: string | null; size: { w: number; h: number }; name?: string }
+  | { type: "layer/add"; image: string | null; size: { w: number; h: number }; name?: string; linkId?: string }
   | { type: "layer/duplicate"; id: string }
   | { type: "layer/remove"; id: string }
   | { type: "layer/move"; id: string; to: number }
@@ -145,12 +145,13 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
   switch (action.type) {
     /* ---- structure ---- */
     case "layer/add": {
-      const layer = createLayer({
+      const created = createLayer({
         image: action.image,
         size: action.size,
         name: action.name ?? `Layer ${layers.length}`,
         pose: defaultFitPose(action.size.w, action.size.h),
       });
+      const layer = action.linkId ? { ...created, linkId: action.linkId } : created;
       next = addLayer(layers, layer, frame.activeLayerId);
       activeLayerId = layer.id;
       break;

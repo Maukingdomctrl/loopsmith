@@ -10,15 +10,12 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus } from "lucide-react";
 
 import type { BlendMode, Layer, LayerSelection } from "@/types/layer";
 import { BLEND_LABELS, BLEND_MODES } from "@/types/layer";
 import type { LayerAction } from "@/lib/layers/editor";
-import { MAX_LAYERS_PER_FRAME } from "@/lib/layers/constants";
-
-/** Same sheet size the paint tools give an empty base layer. */
-const BLANK_LAYER_SIZE = 512;
+import { BLANK_LAYER_SIZE, MAX_LAYERS_PER_FRAME } from "@/lib/layers/constants";
 
 interface Props {
   layers: readonly Layer[];
@@ -27,10 +24,12 @@ interface Props {
   onSelect: (id: string, mode?: "replace" | "toggle" | "add" | "range") => void;
   dispatch: (a: LayerAction) => void;
   onAddImage: () => void;
+  /** Add one blank layer to every frame of the animation. */
+  onAddBlankAllFrames?: () => void;
 }
 
 export default function LayerPanel({
-  layers, selection, disabled, onSelect, dispatch, onAddImage,
+  layers, selection, disabled, onSelect, dispatch, onAddImage, onAddBlankAllFrames,
 }: Props) {
   // Reverse for display only. The index handed back to `moveLayer` is always
   // recomputed against the real array.
@@ -86,6 +85,16 @@ export default function LayerPanel({
           >
             <Plus size={14} />
           </button>
+          {onAddBlankAllFrames && (
+            <button
+              onClick={onAddBlankAllFrames}
+              disabled={disabled}
+              title="New blank layer on every frame"
+              className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+            >
+              <CopyPlus size={14} />
+            </button>
+          )}
           <button
             onClick={onAddImage}
             disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
