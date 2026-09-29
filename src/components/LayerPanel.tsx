@@ -10,10 +10,10 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown } from "lucide-react";
 
-import type { BlendMode, Layer, LayerSelection } from "@/types/layer";
-import { BLEND_LABELS, BLEND_MODES } from "@/types/layer";
+import type { Adjustment, AdjustmentType, BlendMode, ColorBalanceTone, Layer, LayerSelection } from "@/types/layer";
+import { ADJUSTMENT_LABELS, BLEND_LABELS, BLEND_MODES } from "@/types/layer";
 import type { LayerAction } from "@/lib/layers/editor";
 import { BLANK_LAYER_SIZE, MAX_LAYERS_PER_FRAME } from "@/lib/layers/constants";
 
@@ -26,11 +26,19 @@ interface Props {
   onAddImage: () => void;
   /** Add one blank layer to every frame of the animation. */
   onAddBlankAllFrames?: () => void;
+  /** Add an adjustment layer (on every frame). */
+  onAddAdjustment?: (type: AdjustmentType) => void;
+  /** Open one undo step; called when a slider drag starts. */
+  onBeginEdit?: () => void;
 }
+
+const ADJUSTMENT_TYPES: readonly AdjustmentType[] = ["brightnessContrast", "hueSaturation", "colorBalance"];
 
 export default function LayerPanel({
   layers, selection, disabled, onSelect, dispatch, onAddImage, onAddBlankAllFrames,
+  onAddAdjustment, onBeginEdit,
 }: Props) {
+  const [adjustMenu, setAdjustMenu] = useState(false);
   // Reverse for display only. The index handed back to `moveLayer` is always
   // recomputed against the real array.
   const rows = useMemo(() => [...layers].reverse(), [layers]);
@@ -103,6 +111,31 @@ export default function LayerPanel({
           >
             <ImagePlus size={14} />
           </button>
+          {onAddAdjustment && (
+            <div className="relative">
+              <button
+                onClick={() => setAdjustMenu((v) => !v)}
+                disabled={disabled}
+                title="New adjustment layer"
+                className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+              >
+                <SlidersHorizontal size={14} />
+              </button>
+              {adjustMenu && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded border border-white/10 bg-zinc-900 py-1 shadow-lg">
+                  {ADJUSTMENT_TYPES.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => { setAdjustMenu(false); onAddAdjustment(t); }}
+                      className="block w-full px-3 py-1 text-left text-xs text-zinc-200 hover:bg-zinc-700"
+                    >
+                      {ADJUSTMENT_LABELS[t]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -140,9 +173,18 @@ export default function LayerPanel({
                 {layer.visible ? <Eye size={13} /> : <EyeOff size={13} />}
               </button>
 
-              <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded border border-zinc-700 bg-[#1b1f28]">
-                {layer.image && (
-                  <img src={layer.image} alt="" className="h-full w-full object-contain" />
+              {layer.clip && (
+                <span title="Clipped to the layer below" className="-mr-1 text-zinc-400">
+                  <CornerLeftDown size={12} />
+                </span>
+              )}
+              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded border border-zinc-700 bg-[#1b1f28]">
+                {layer.adjust ? (
+                  <SlidersHorizontal size={14} className="text-zinc-400" />
+                ) : (
+                  layer.image && (
+                    <img src={layer.image} alt="" className="h-full w-full object-contain" />
+                  )
                 )}
               </div>
 
@@ -207,6 +249,8 @@ export default function LayerPanel({
               type="range" min={0} max={100} step={1}
               value={Math.round(primaryLayer.opacity * 100)}
               disabled={disabled || primaryLayer.locked}
+              onPointerDown={() => { if (primaryLayer.linkId) onBeginEdit?.(); }}
+              onKeyDown={(e) => { if (primaryLayer.linkId && movesSlider(e.key)) onBeginEdit?.(); }}
               onChange={(e) =>
                 dispatch({
                   type: "layer/opacity",
@@ -218,6 +262,16 @@ export default function LayerPanel({
             />
           </label>
 
+          {primaryLayer.adjust && (
+            <AdjustmentControls
+              value={primaryLayer.adjust}
+              disabled={disabled || primaryLayer.locked}
+              onBegin={() => onBeginEdit?.()}
+              onChange={(value) => dispatch({ type: "layer/adjust", id: primaryLayer.id, value })}
+            />
+          )}
+
+          {!primaryLayer.adjust && (
           <label className="block text-[10px] text-zinc-400">
             Blend
             <select
@@ -237,7 +291,27 @@ export default function LayerPanel({
               ))}
             </select>
           </label>
+          )}
 
+          {primaryLayer.kind !== "base" && (
+            <button
+              onClick={() =>
+                dispatch({ type: "layer/clip", id: primaryLayer.id, value: !primaryLayer.clip })
+              }
+              disabled={disabled || primaryLayer.locked}
+              title="Clipping mask: show this layer only where the layer below has pixels"
+              className={`flex w-full items-center gap-2 rounded px-2 py-1 text-[10px] disabled:opacity-40 ${
+                primaryLayer.clip
+                  ? "bg-indigo-500/30 text-white"
+                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+              }`}
+            >
+              <CornerLeftDown size={12} />
+              Clip to layer below
+            </button>
+          )}
+
+          {!primaryLayer.adjust && (
           <button
             onClick={() =>
               dispatch({
@@ -257,6 +331,7 @@ export default function LayerPanel({
             <Grid2x2Check size={12} />
             Lock transparent pixels
           </button>
+          )}
 
           <div className="flex gap-1">
             <button
@@ -289,5 +364,109 @@ export default function LayerPanel({
         </div>
       )}
     </aside>
+  );
+}
+
+/* ---------------- adjustment sliders ---------------- */
+
+/** Keys that change a range input's value (and so start an undo step). */
+const movesSlider = (key: string) =>
+  ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(key);
+
+function Slider({
+  label, value, min, max, disabled, onBegin, onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled?: boolean;
+  onBegin: () => void;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="block text-[10px] text-zinc-400">
+      <span className="flex justify-between">
+        <span>{label}</span>
+        <span className="text-zinc-300">{value > 0 ? `+${value}` : value}</span>
+      </span>
+      <input
+        type="range" min={min} max={max} step={1}
+        value={value}
+        disabled={disabled}
+        onPointerDown={onBegin}
+        onKeyDown={(e) => { if (movesSlider(e.key)) onBegin(); }}
+        onDoubleClick={() => { onBegin(); onChange(0); }}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-indigo-500 disabled:opacity-40"
+      />
+    </label>
+  );
+}
+
+type Tone = "shadows" | "midtones" | "highlights";
+const TONES: readonly Tone[] = ["shadows", "midtones", "highlights"];
+const BALANCE_LABELS = ["Cyan – Red", "Magenta – Green", "Yellow – Blue"] as const;
+
+function AdjustmentControls({
+  value, disabled, onBegin, onChange,
+}: {
+  value: Adjustment;
+  disabled?: boolean;
+  onBegin: () => void;
+  onChange: (v: Adjustment) => void;
+}) {
+  const [tone, setTone] = useState<Tone>("midtones");
+  const common = { disabled, onBegin };
+
+  if (value.type === "brightnessContrast") {
+    return (
+      <div className="space-y-1">
+        <Slider {...common} label="Brightness" min={-100} max={100} value={value.brightness}
+          onChange={(v) => onChange({ ...value, brightness: v })} />
+        <Slider {...common} label="Contrast" min={-100} max={100} value={value.contrast}
+          onChange={(v) => onChange({ ...value, contrast: v })} />
+      </div>
+    );
+  }
+
+  if (value.type === "hueSaturation") {
+    return (
+      <div className="space-y-1">
+        <Slider {...common} label="Hue" min={-180} max={180} value={value.hue}
+          onChange={(v) => onChange({ ...value, hue: v })} />
+        <Slider {...common} label="Saturation" min={-100} max={100} value={value.saturation}
+          onChange={(v) => onChange({ ...value, saturation: v })} />
+        <Slider {...common} label="Lightness" min={-100} max={100} value={value.lightness}
+          onChange={(v) => onChange({ ...value, lightness: v })} />
+      </div>
+    );
+  }
+
+  const current: ColorBalanceTone = value[tone];
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-0.5">
+        {TONES.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTone(t)}
+            className={`flex-1 rounded py-0.5 text-[10px] capitalize ${
+              tone === t ? "bg-indigo-500/30 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      {BALANCE_LABELS.map((label, c) => (
+        <Slider {...common} key={label} label={label} min={-100} max={100} value={current[c]}
+          onChange={(v) => {
+            const next = [...current] as [number, number, number];
+            next[c] = v;
+            onChange({ ...value, [tone]: next });
+          }} />
+      ))}
+    </div>
   );
 }

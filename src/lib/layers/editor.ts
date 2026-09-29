@@ -15,7 +15,7 @@
 
 import type { Rect, Vec2 } from "@/types/geometry";
 import type { Frame } from "@/types/frame";
-import type { BlendMode, Layer, LayerSelection } from "@/types/layer";
+import type { Adjustment, BlendMode, Layer, LayerSelection } from "@/types/layer";
 import { EMPTY_SELECTION } from "@/types/layer";
 import { clearTransforms } from "@/lib/frameTransform";
 import {
@@ -72,7 +72,14 @@ import { pruneSelection, selectOnly } from "./selection";
 
 export type LayerAction =
   /* structure */
-  | { type: "layer/add"; image: string | null; size: { w: number; h: number }; name?: string; linkId?: string }
+  | {
+      type: "layer/add";
+      image: string | null;
+      size: { w: number; h: number };
+      name?: string;
+      linkId?: string;
+      adjust?: Adjustment;
+    }
   | { type: "layer/duplicate"; id: string }
   | { type: "layer/remove"; id: string }
   | { type: "layer/move"; id: string; to: number }
@@ -87,6 +94,8 @@ export type LayerAction =
   | { type: "layer/opacity"; id: string; value: number }
   | { type: "layer/blend"; id: string; value: BlendMode }
   | { type: "layer/alphaLock"; id: string; value: boolean }
+  | { type: "layer/clip"; id: string; value: boolean }
+  | { type: "layer/adjust"; id: string; value: Adjustment }
   | { type: "layer/setImage"; id: string; image: string; size: { w: number; h: number } }
   | { type: "layer/sizeKnown"; id: string; width: number; height: number }
   | { type: "layer/setActive"; id: string }
@@ -151,7 +160,11 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
         name: action.name ?? `Layer ${layers.length}`,
         pose: defaultFitPose(action.size.w, action.size.h),
       });
-      const layer = action.linkId ? { ...created, linkId: action.linkId } : created;
+      const layer = {
+        ...created,
+        ...(action.linkId && { linkId: action.linkId }),
+        ...(action.adjust && { adjust: action.adjust }),
+      };
       next = addLayer(layers, layer, frame.activeLayerId);
       activeLayerId = layer.id;
       break;
@@ -181,6 +194,8 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
     case "layer/opacity": next = setLayerOpacity(layers, action.id, action.value); break;
     case "layer/blend":   next = updateLayer(layers, action.id, { blend: action.value }); break;
     case "layer/alphaLock": next = updateLayer(layers, action.id, { alphaLock: action.value }); break;
+    case "layer/clip":      next = updateLayer(layers, action.id, { clip: action.value }); break;
+    case "layer/adjust":    next = updateLayer(layers, action.id, { adjust: action.value }); break;
 
     case "layer/setImage": {
   const existing = findLayer(layers, action.id);

@@ -251,6 +251,8 @@ function shallowEqualLayer(a: Layer, b: Layer): boolean {
     a.locked === b.locked &&
     a.blend === b.blend &&
     a.alphaLock === b.alphaLock &&
+    a.clip === b.clip &&
+    a.adjust === b.adjust &&
     a.size.w === b.size.w &&
     a.size.h === b.size.h &&
     a.crop === b.crop &&

@@ -67,8 +67,8 @@ import { defaultFitPose } from "@/lib/layers/layerSpace";
 import { clearTransforms } from "@/lib/frameTransform";
 /* ---------- layer system ---------- */
 
-import type { CanvasBackground } from "@/types/layer";
-import { DEFAULT_BACKGROUND } from "@/types/layer";
+import type { AdjustmentType, CanvasBackground } from "@/types/layer";
+import { ADJUSTMENT_LABELS, DEFAULT_BACKGROUND, defaultAdjustment } from "@/types/layer";
 import { useLayerEditor } from "@/hooks/useLayerEditor";
 import {
   attachLayerSize,
@@ -668,7 +668,9 @@ const frames = activeProject?.frames.length
       const el = e.target as HTMLElement | null;
       if (
         el &&
-        (el.tagName === "INPUT" ||
+        ((el.tagName === "INPUT" &&
+          // A slider keeps focus after a drag; undo must still work there.
+          (el as HTMLInputElement).type !== "range") ||
           el.tagName === "TEXTAREA" ||
           el.isContentEditable)
       ) {
@@ -942,23 +944,67 @@ const frames = activeProject?.frames.length
     }));
   };
 
-  /** Layer panel edits. Blend and alpha lock on a layer that has copies on
-   *  other frames change every copy, as one undo step. */
+  /** An adjustment layer recolours the whole animation, so it goes on every
+   *  frame, linked, as one undo step. */
+  const addAdjustmentLayer = (type: AdjustmentType) => {
+    const linkId = createLayerId();
+    const adjust = defaultAdjustment(type);
+    const name = ADJUSTMENT_LABELS[type];
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f) =>
+        layerReducer(f, { type: "layer/add", image: null, size: { w: 0, h: 0 }, name, linkId, adjust })
+      ),
+    }));
+  };
+
+  /** Apply `fn` to the project without an undo step: slider drags push theirs
+   *  once, when the drag starts (`onBeginEdit`). */
+  const updateProjectQuiet = (fn: (p: Project) => Project) => {
+    setIsPlaying(false);
+    setProjects((prev) => {
+      const next = prev.map((p) =>
+        p.id === activeProjectId ? updateProjectTimestamp(fn(p)) : p
+      );
+      projectsRef.current = next;
+      return next;
+    });
+  };
+
+  /**
+   * Layer panel edits. Settings of a layer that has linked copies on other
+   * frames (blend, alpha lock, clipping, opacity, adjustment) change every
+   * copy. Toggles are one undo step each; slider drags one per drag.
+   */
   const dispatchLayerPanel = (action: LayerAction) => {
-    if (action.type === "layer/blend" || action.type === "layer/alphaLock") {
-      const linkId = editFrame.layers.find((l) => l.id === action.id)?.linkId;
-      if (linkId && !isPlaying && !selectionActive) {
-        updateProject((project) => ({
-          ...project,
-          frames: project.frames.map((f) => {
-            const twin = f.layers.find((l) => l.linkId === linkId);
-            return twin ? layerReducer(f, { ...action, id: twin.id }) : f;
-          }),
-        }));
-        return;
-      }
+    const linked =
+      action.type === "layer/blend" ||
+      action.type === "layer/alphaLock" ||
+      action.type === "layer/clip" ||
+      action.type === "layer/opacity" ||
+      action.type === "layer/adjust";
+    if (!linked || isPlaying || selectionActive) {
+      editor.dispatch(action);
+      return;
     }
-    editor.dispatch(action);
+    const layer = editFrame.layers.find((l) => l.id === action.id);
+    const linkId = layer?.linkId;
+    // Adjustment sliders always come here, so their undo is per drag.
+    if (!layer || (!linkId && action.type !== "layer/adjust")) {
+      editor.dispatch(action);
+      return;
+    }
+    const apply = (project: Project): Project => ({
+      ...project,
+      frames: project.frames.map((f) => {
+        const twin = linkId
+          ? f.layers.find((l) => l.linkId === linkId)
+          : f.id === editFrame.id ? layer : undefined;
+        return twin ? layerReducer(f, { ...action, id: twin.id }) : f;
+      }),
+    });
+    if (action.type === "layer/opacity" || action.type === "layer/adjust") updateProjectQuiet(apply);
+    else updateProject(apply);
   };
 
   const handleImport = (file: File) => {
@@ -1177,6 +1223,8 @@ const deleteProject = useCallback(
               openPicker({ kind: "new-layer", frame: editingIndex })
             }
             onAddBlankAllFrames={addBlankLayerAllFrames}
+            onAddAdjustment={addAdjustmentLayer}
+            onBeginEdit={handleHistoryCommit}
           />
         )}
 
