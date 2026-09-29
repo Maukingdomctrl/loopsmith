@@ -94,7 +94,7 @@ export const WATER_TUNING = {
   /** Pigment drift toward thinner water, per step, on the RELATIVE depth
    *  difference across a face — so it stays strong right at the wet front,
    *  where the absolute difference is small but the relative one is total. */
-  eta: 0.55, // stronger pulled nearly all pigment to the rim: a pale body in a hard outline
+  eta: 0.4, // stronger pulls most pigment to the rim: a pale body in a hard outline (scaled by size in `edgeDrift`)
   driftSoft: 0.02,
   /** Drift into tooth valleys is stronger than onto peaks (0 = indifferent). */
   driftValley: 0.3,
@@ -168,9 +168,12 @@ export class WaterModel implements BrushModel {
   /** Cells that may still be wet, half-open. Empty when x1 <= x0. */
   private bx0 = 0; private by0 = 0; private bx1 = 0; private by1 = 0;
   private active = false;
+  /** Edge drift for this brush size (see `edgeDrift`). */
+  private readonly eta: number;
 
   constructor(ctx: ModelContext) {
     this.ctx = ctx;
+    this.eta = edgeDrift(ctx.size * ctx.scale);
     this.w = ctx.width;
     this.h = ctx.height;
     const n = ctx.width * ctx.height;
@@ -422,11 +425,11 @@ export class WaterModel implements BrushModel {
       if (sdiff > 0) {
         // toward b: a valley at b invites pigment
         const valley = 1 + T.driftValley * (0.5 - tooth[b]) * 2 * T.granulation;
-        const d = rate * T.eta * pig[a] * rel * (valley > 0 ? valley : 0), cap = T.flowCap * pig[a];
+        const d = rate * this.eta * pig[a] * rel * (valley > 0 ? valley : 0), cap = T.flowCap * pig[a];
         pf += d < cap ? d : cap;
       } else {
         const valley = 1 + T.driftValley * (0.5 - tooth[a]) * 2 * T.granulation;
-        const d = rate * T.eta * pig[b] * rel * (valley > 0 ? valley : 0), cap = T.flowCap * pig[b];
+        const d = rate * this.eta * pig[b] * rel * (valley > 0 ? valley : 0), cap = T.flowCap * pig[b];
         pf -= d < cap ? d : cap;
       }
     }
@@ -499,6 +502,17 @@ export class WaterModel implements BrushModel {
       }
     }
   }
+}
+
+/**
+ * How strongly pigment drifts to the edge, by brush radius in canvas px.
+ *
+ * The darkened rim is a couple of pixels wide whatever the brush size, so at
+ * full strength a small brush is ALL rim: a hollow outline with a white centre.
+ * Small brushes get almost none; from about radius 30 the full `eta` applies.
+ */
+function edgeDrift(radiusPx: number): number {
+  return WATER_TUNING.eta * (0.05 + 0.95 * smoothstep(4, 30, radiusPx));
 }
 
 /**
