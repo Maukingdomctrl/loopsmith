@@ -55,6 +55,7 @@ import type { Snapshot } from "@/types/history";
 import { layerReducer, type LayerAction } from "@/lib/layers/editor";
 import { BLANK_LAYER_SIZE } from "@/lib/layers/constants";
 import { applyMaskToPixels } from "@/lib/layers/maskOps";
+import { removeFrameBackground } from "@/lib/sprite/removeBackground";
 import {
   createBlankFrame,
   duplicateFrame,
@@ -888,6 +889,70 @@ const frames = activeProject?.frames.length
   );
 
   /**
+   * Remove the solid background baked into every frame's artwork (the colour
+   * of the sheet it was cut from) and make that colour the canvas background.
+   * The look is unchanged, but the colour no longer moves with the artwork,
+   * and choosing Transparent afterwards removes it entirely. One undo step.
+   */
+  const [removingArtBg, setRemovingArtBg] = useState(false);
+  const [artBgNotice, setArtBgNotice] = useState<string | null>(null);
+  const removeArtBackground = async () => {
+    const project = projectsRef.current.find((p) => p.id === activeProjectId);
+    if (!project || removingArtBg) return;
+    setRemovingArtBg(true);
+    setArtBgNotice(null);
+    try {
+      const results = new Map<string, { layerId: string; image: string }>();
+      const colours = new Map<number, number>();
+      for (const f of project.frames) {
+        const base = f.layers.find((l) => l.kind === "base");
+        if (!base?.image) continue;
+        const img = await loadBitmap(base.image).catch(() => null);
+        if (!img) continue;
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        const ctx = c.getContext("2d", { willReadFrequently: true });
+        if (!ctx) continue;
+        ctx.drawImage(img, 0, 0);
+        const out = removeFrameBackground(ctx.getImageData(0, 0, c.width, c.height));
+        if (!out) continue;
+        ctx.putImageData(out.image, 0, 0);
+        results.set(f.id, { layerId: base.id, image: c.toDataURL("image/png") });
+        colours.set(out.background, (colours.get(out.background) ?? 0) + 1);
+      }
+      if (!results.size) {
+        setArtBgNotice("No solid background colour found in the frames.");
+        return;
+      }
+      // Decode first, so the canvas never shows a frame without its artwork.
+      await Promise.all([...results.values()].map((r) => loadBitmap(r.image).catch(() => null)));
+      const [colour] = [...colours].sort((a, b) => b[1] - a[1])[0];
+      const hex = `#${colour.toString(16).padStart(6, "0")}`;
+      updateProject((p) => ({
+        ...p,
+        background: { ...p.background, transparent: false, color: hex },
+        frames: p.frames.map((f) => {
+          const r = results.get(f.id);
+          return r
+            ? {
+                ...f,
+                layers: f.layers.map((l) => (l.id === r.layerId ? { ...l, image: r.image } : l)),
+                flattenKey: null,
+              }
+            : f;
+        }),
+      }));
+      setArtBgNotice(
+        `Removed from ${results.size} frame${results.size === 1 ? "" : "s"}. ` +
+          "The colour is now a steady background; pick Transparent to remove it."
+      );
+    } finally {
+      setRemovingArtBg(false);
+    }
+  };
+
+  /**
    * Clear the active layer's pixels.
    *
    * Written here rather than as a reducer action because it is the legacy
@@ -1340,6 +1405,9 @@ const deleteProject = useCallback(
             background={background}
             onChange={handleBackgroundChange}
             disabled={isPlaying}
+            onRemoveArtBackground={removeArtBackground}
+            removingArtBackground={removingArtBg}
+            artBackgroundNotice={artBgNotice}
           />
         </RightSidebar>
       </section>
