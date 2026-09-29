@@ -182,8 +182,10 @@ export function compositeLayers(
     const bitmap = resolve(layer);
     // Undecoded pixels: skip until they decode (the caller repaints then).
     if (layer.image && !bitmap) continue;
+    const mask = layerMask(layer, resolve);
+    if (mask === false) continue;
 
-    drawLayer(ctx, layer, bitmap, docScale, smoothing, options);
+    drawLayer(ctx, layer, bitmap, docScale, smoothing, options, mask);
   }
 
   ctx.restore();
@@ -227,7 +229,7 @@ function compositeStack(
     // An adjustment has no pixels to clip to: layers clipped to it simply
     // draw normally, so only the adjustment itself is consumed here.
     if (layer.adjust) {
-      if (shown(layer)) applyAdjustTo(stack.ctx, size, layer);
+      if (shown(layer)) applyAdjustTo(stack.ctx, layer, resolve, docScale, smoothing, size);
       i++;
       continue;
     }
@@ -241,30 +243,35 @@ function compositeStack(
     if (!shown(layer) || !isLayerRenderable(layer)) continue;
     const bitmap = resolve(layer);
     if (layer.image && !bitmap) continue;
+    const layerM = layerMask(layer, resolve);
+    if (layerM === false) continue;
 
     if (!clipped.length) {
-      drawLayer(stack.ctx, layer, bitmap, docScale, smoothing, opts);
+      drawLayer(stack.ctx, layer, bitmap, docScale, smoothing, opts, layerM);
       continue;
     }
 
     const group = createSurface(size);
     const mask = createSurface(size);
     if (!group || !mask) continue;
-    drawLayer(mask.ctx, { ...layer, opacity: 1, blend: "normal" }, bitmap, docScale, smoothing, opts);
+    // The base's own mask shapes the whole group.
+    drawLayer(mask.ctx, { ...layer, opacity: 1, blend: "normal" }, bitmap, docScale, smoothing, opts, layerM);
     group.ctx.drawImage(mask.canvas as CanvasImageSource, 0, 0);
 
     for (const c of clipped) {
       if (!shown(c)) continue;
       if (c.adjust) {
-        applyAdjustTo(group.ctx, size, c);
+        applyAdjustTo(group.ctx, c, resolve, docScale, smoothing, size);
         continue;
       }
       if (!isLayerRenderable(c)) continue;
       const cb = resolve(c);
       if (c.image && !cb) continue;
+      const cm = layerMask(c, resolve);
+      if (cm === false) continue;
       const own = createSurface(size);
       if (!own) continue;
-      drawLayer(own.ctx, { ...c, blend: "normal" }, cb, docScale, smoothing, opts);
+      drawLayer(own.ctx, { ...c, blend: "normal" }, cb, docScale, smoothing, opts, cm);
       own.ctx.setTransform(1, 0, 0, 1, 0, 0);
       own.ctx.globalCompositeOperation = "destination-in";
       own.ctx.drawImage(mask.canvas as CanvasImageSource, 0, 0);
@@ -287,12 +294,104 @@ function compositeStack(
   return stack.canvas;
 }
 
-/** Run an adjustment layer over everything on `ctx` so far. */
-function applyAdjustTo(ctx: Surface2D, size: number, layer: Layer): void {
+/** Run an adjustment layer over everything on `ctx` so far, through its
+ *  mask when it has one. */
+function applyAdjustTo(
+  ctx: Surface2D,
+  layer: Layer,
+  resolve: BitmapResolver,
+  docScale: number,
+  smoothing: boolean,
+  size: number
+): void {
   if (!layer.adjust || layer.opacity <= 0 || isIdentityAdjustment(layer.adjust)) return;
+  const mask = layerMask(layer, resolve);
+  if (mask === false) return;
+  let weights: Uint8ClampedArray | undefined;
+  if (mask) {
+    const m = createSurface(size);
+    if (!m) return;
+    m.ctx.imageSmoothingEnabled = smoothing;
+    matSetTransform(
+      m.ctx as CanvasRenderingContext2D,
+      matChain(matScale(docScale, docScale), layerMatrix(layer))
+    );
+    m.ctx.drawImage(mask, 0, 0, layer.size.w, layer.size.h);
+    weights = m.ctx.getImageData(0, 0, size, size).data;
+  }
   const img = ctx.getImageData(0, 0, size, size);
-  applyAdjustment(img.data, layer.adjust, layer.opacity);
+  applyAdjustment(img.data, layer.adjust, layer.opacity, weights);
   ctx.putImageData(img, 0, 0);
+}
+
+/* ---------------- layer masks ---------------- */
+
+/** Alpha form of decoded mask images (white → opaque), by image + invert. */
+const maskAlphaCache = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
+const MASK_CACHE_MAX = 64;
+
+/**
+ * A layer's mask as an alpha image in layer space.
+ *   null  — no masking (no mask, mask off, or a reveal-all mask);
+ *   false — draw nothing (hide-all mask, or the mask is still decoding).
+ */
+export function layerMask(layer: Layer, resolve: BitmapResolver): CanvasImageSource | null | false {
+  const m = layer.mask;
+  if (!m || !m.enabled) return null;
+  if (!m.image) return (m.fill === 255) !== m.inverted ? null : false;
+
+  // The resolver decodes it like any layer image; a preview can substitute
+  // its live mask by answering for `<id>#mask`.
+  const bmp = resolve({ ...layer, id: `${layer.id}#mask`, image: m.image });
+  if (!bmp) return false;
+
+  const cacheable = typeof HTMLImageElement !== "undefined" && bmp.image instanceof HTMLImageElement;
+  const key = `${m.inverted ? 1 : 0}|${m.image}`;
+  if (cacheable) {
+    const hit = maskAlphaCache.get(key);
+    if (hit) return hit;
+  }
+  const out = createSurface(Math.max(bmp.width, bmp.height));
+  if (!out) return null;
+  const w = bmp.width, h = bmp.height;
+  const canvas = out.canvas;
+  canvas.width = w;
+  canvas.height = h;
+  out.ctx.drawImage(bmp.image, 0, 0);
+  const img = out.ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // Grey value (the red channel of a grey mask) becomes coverage.
+    const v = (d[i] * d[i + 3]) / 255;
+    d[i + 3] = m.inverted ? 255 - v : v;
+    d[i] = d[i + 1] = d[i + 2] = 0;
+  }
+  out.ctx.putImageData(img, 0, 0);
+  if (cacheable) {
+    maskAlphaCache.set(key, canvas);
+    if (maskAlphaCache.size > MASK_CACHE_MAX) {
+      maskAlphaCache.delete(maskAlphaCache.keys().next().value as string);
+    }
+  }
+  return canvas;
+}
+
+/** Keep only what the mask shows: `surface` already holds the layer drawn in
+ *  output space; the mask is drawn through the same layer matrix. */
+function applyMask(
+  target: Surface2D,
+  mask: CanvasImageSource,
+  layer: Layer,
+  matrix: Mat2D,
+  smoothing: boolean
+): void {
+  target.save();
+  target.imageSmoothingEnabled = smoothing;
+  matSetTransform(target as CanvasRenderingContext2D, matrix);
+  target.globalCompositeOperation = "destination-in";
+  target.globalAlpha = 1;
+  target.drawImage(mask, 0, 0, layer.size.w, layer.size.h);
+  target.restore();
 }
 
 function drawLayer(
@@ -301,7 +400,8 @@ function drawLayer(
   bitmap: LayerBitmap | null,
   docScale: number,
   smoothing: boolean,
-  options: CompositeOptions
+  options: CompositeOptions,
+  mask: CanvasImageSource | null = null
 ): void {
   const box = layerContentBox(layer);
   if (rectIsEmpty(box)) return;
@@ -310,10 +410,18 @@ function drawLayer(
   const composite = BLEND_TO_COMPOSITE[layer.blend] ?? "source-over";
 
   if (layer.strokes?.length) {
-    const iso = layerWithStrokes(
+    let iso: HTMLCanvasElement | OffscreenCanvas | null = layerWithStrokes(
       layer, bitmap, matrix, box, smoothing, options.surface, options.interactive ?? false
     );
     if (!iso) return;
+    if (mask) {
+      // The stroke render is cached: mask a copy, never the cache.
+      const copy = createSurface(options.surface);
+      if (!copy) return;
+      copy.ctx.drawImage(iso as CanvasImageSource, 0, 0);
+      applyMask(copy.ctx, mask, layer, matrix, smoothing);
+      iso = copy.canvas;
+    }
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = (options.globalAlpha ?? 1) * layer.opacity;
@@ -324,7 +432,7 @@ function drawLayer(
   }
   if (!bitmap) return;
 
-  const needsIsolation = composite !== "source-over";
+  const needsIsolation = composite !== "source-over" || !!mask;
 
   if (!needsIsolation) {
     ctx.save();
@@ -352,6 +460,7 @@ function drawLayer(
   matSetTransform(iso.ctx as CanvasRenderingContext2D, matrix);
   drawCropped(iso.ctx, bitmap, box);
   iso.ctx.restore();
+  if (mask) applyMask(iso.ctx, mask, layer, matrix, smoothing);
 
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);

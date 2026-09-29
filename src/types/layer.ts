@@ -93,6 +93,22 @@ export function defaultAdjustment(type: AdjustmentType): Adjustment {
   }
 }
 
+/**
+ * A layer mask, as in Photoshop: white shows the layer, black hides it, grey
+ * is partial. Pixels live in the layer's own space (so the mask moves with the
+ * layer), at the layer's size.
+ */
+export interface LayerMask {
+  /** Greyscale PNG. null = a solid mask of `fill` (no pixels painted yet). */
+  readonly image: string | null;
+  /** Colour of a mask with no image: 255 reveals all, 0 hides all. */
+  readonly fill: 0 | 255;
+  /** Show where it is black instead (Invert). */
+  readonly inverted: boolean;
+  /** Off = the layer draws as if it had no mask. */
+  readonly enabled: boolean;
+}
+
 export interface Layer {
   readonly id: string;
   readonly kind: LayerKind;
@@ -129,6 +145,7 @@ export interface Layer {
   /** Adjustment layer: no pixels of its own; recolours everything below it
    *  (or, when clipped, only its clipping group). Opacity is its strength. */
   readonly adjust?: Adjustment;
+  readonly mask?: LayerMask;
 
   /** Pencil strokes, stored as recorded physics in layer space and drawn over
    *  `image` analytically at render time. Never baked unless a pixel tool

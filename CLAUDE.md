@@ -38,6 +38,10 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
   its own surface only when a frame has them (`compositeStack`), so other frames render exactly as before.
   Adjustment math is `lib/layers/adjust.ts`. Layers added "on every frame" share a `linkId`; the layer
   panel's blend, lock, clip, opacity and adjustment edits apply to every linked copy (`page.tsx`).
+- **Layer masks** (`layer.mask`): greyscale PNG in layer space (white shows), or a solid fill when unpainted;
+  `inverted` / `enabled` are flags. The compositor turns it into alpha (`layerMask`) and applies it with
+  `destination-in`; adjustment layers use it as per-pixel strength. With the mask thumbnail picked
+  (`editMask`), every paint tool paints greys into the mask through the pixel surface.
 - Tools: Pencil (P), Brush (B, opens its panel), Eraser (E), Fill (G), Picker (I).
 - Every paint edit is one undo step (`onHistoryCommit`) and sets `flattenKey: null`.
 - Background is document state (`CanvasBackground`); checkerboard is view-only and never exported.

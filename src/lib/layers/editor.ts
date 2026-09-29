@@ -15,7 +15,8 @@
 
 import type { Rect, Vec2 } from "@/types/geometry";
 import type { Frame } from "@/types/frame";
-import type { Adjustment, BlendMode, Layer, LayerSelection } from "@/types/layer";
+import type { Adjustment, BlendMode, Layer, LayerMask, LayerSelection } from "@/types/layer";
+import { BLANK_LAYER_SIZE } from "./constants";
 import { EMPTY_SELECTION } from "@/types/layer";
 import { clearTransforms } from "@/lib/frameTransform";
 import {
@@ -68,6 +69,7 @@ import {
 } from "./crop";
 import { attachLayerSize, syncBaseFromLegacy } from "./migrate";
 import { defaultFitPose } from "./layerSpace";
+import { makePose } from "@/lib/geometry/pose";
 import { pruneSelection, selectOnly } from "./selection";
 
 export type LayerAction =
@@ -96,6 +98,9 @@ export type LayerAction =
   | { type: "layer/alphaLock"; id: string; value: boolean }
   | { type: "layer/clip"; id: string; value: boolean }
   | { type: "layer/adjust"; id: string; value: Adjustment }
+  | { type: "layer/maskAdd"; id: string; hideAll?: boolean }
+  | { type: "layer/maskSet"; id: string; patch: Partial<Pick<LayerMask, "inverted" | "enabled">> }
+  | { type: "layer/maskDelete"; id: string }
   | { type: "layer/setImage"; id: string; image: string; size: { w: number; h: number } }
   | { type: "layer/sizeKnown"; id: string; width: number; height: number }
   | { type: "layer/setActive"; id: string }
@@ -196,6 +201,29 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
     case "layer/alphaLock": next = updateLayer(layers, action.id, { alphaLock: action.value }); break;
     case "layer/clip":      next = updateLayer(layers, action.id, { clip: action.value }); break;
     case "layer/adjust":    next = updateLayer(layers, action.id, { adjust: action.value }); break;
+    case "layer/maskAdd": {
+      const l = findLayer(layers, action.id);
+      if (!l || l.mask) break;
+      const mask: LayerMask = {
+        image: null, fill: action.hideAll ? 0 : 255, inverted: false, enabled: true,
+      };
+      // A layer with no size yet (an adjustment layer, an empty sheet) gets a
+      // canvas-sized one, so its mask has pixels to paint.
+      const sheet = l.size.w <= 0 || l.size.h <= 0
+        ? {
+            size: { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE },
+            pose: makePose(defaultFitPose(BLANK_LAYER_SIZE, BLANK_LAYER_SIZE)),
+          }
+        : {};
+      next = updateLayer(layers, action.id, { mask, ...sheet });
+      break;
+    }
+    case "layer/maskSet": {
+      const l = findLayer(layers, action.id);
+      if (l?.mask) next = updateLayer(layers, action.id, { mask: { ...l.mask, ...action.patch } });
+      break;
+    }
+    case "layer/maskDelete": next = updateLayer(layers, action.id, { mask: undefined }); break;
 
     case "layer/setImage": {
   const existing = findLayer(layers, action.id);

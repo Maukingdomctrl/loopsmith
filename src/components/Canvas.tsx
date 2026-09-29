@@ -37,7 +37,7 @@ import {
   clearTransforms,
   baseLayerMatrix,
 } from "@/lib/frameTransform";
-import { matApply, matInvert } from "@/lib/geometry/mat2d";
+import { MAT_IDENTITY, matApply, matInvert } from "@/lib/geometry/mat2d";
 import { RasterSurface } from "@/lib/raster/surface";
 import { MaterialStroke } from "@/lib/raster/brushes/materialStroke";
 import { brushSpec, defaultBrushPrefs } from "@/lib/raster/brushes/presets";
@@ -52,10 +52,10 @@ import {
   seedFromString,
   type PencilStroke,
 } from "@/lib/pencil/types";
-import { widthFactor } from "@/lib/pencil/render";
+import { renderStrokes, widthFactor } from "@/lib/pencil/render";
 import { bakeLayerStrokes } from "@/lib/pencil/bake";
 import { markLiveStroke, onStrokeRefine, type BitmapResolver } from "@/lib/layers/composite";
-import type { FloodFillSettings } from "@/types/raster";
+import type { FloodFillSettings, RGBA } from "@/types/raster";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
 import { DEFAULT_BACKGROUND } from "@/types/layer";
@@ -123,6 +123,8 @@ interface CanvasProps {
   onUndo?: () => void;
   onRedo?: () => void;
   onSelectionActiveChange?: (active: boolean) => void;
+  /** Paint tools draw on the selected layer's mask instead of its pixels. */
+  editMask?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
   showGuides: boolean;
@@ -195,6 +197,7 @@ export default function Canvas({
   onUndo,
   onRedo,
   onSelectionActiveChange,
+  editMask = false,
   canUndo,
   canRedo,
   showGuides,
@@ -277,6 +280,22 @@ const commit = useCallback((next: Frame) => {
   );
   const paintIdRef = useRef<string | null>(null);
   paintIdRef.current = paintLayer?.id ?? null;
+  /** Painting the layer's mask (greys) rather than its pixels. */
+  const maskMode = editMask && !!paintLayer?.mask;
+  /** What `surfaceRef` must hold pixels of for this target. */
+  const surfaceKey = paintLayer ? (maskMode ? `${paintLayer.id}#mask` : paintLayer.id) : null;
+  /** The image the working surface is made from. */
+  const surfaceImage = paintLayer ? (maskMode ? paintLayer.mask?.image ?? null : paintLayer.image) : null;
+
+  /** The paint colour; on a mask, its grey (inverted masks store the opposite,
+   *  so white still reveals). `hide` = the colour that hides (the eraser). */
+  const paintRGBA = (hide = false): RGBA => {
+    const c = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
+    if (!maskMode) return c;
+    let v = hide ? 0 : 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+    if (paintLayer?.mask?.inverted) v = 1 - v;
+    return { r: v, g: v, b: v, a: 1 };
+  };
 
   /** Canvas → layer matrix of the painted layer. The base keeps its
    *  stabilization offset (baseLayerMatrix); other layers use their pose. */
@@ -388,8 +407,47 @@ const commit = useCallback((next: Frame) => {
   // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
+    if (!paintLayer) return;
+
+    // A mask is plain greys: every tool paints it through the pixel surface.
+    if (maskMode && paintLayer.mask) {
+      const key = `${paintLayer.id}#mask`;
+      if (surfaceLayerRef.current !== key) {
+        surfaceLayerRef.current = key;
+        surfaceRef.current = null;
+        surfaceSrc.current = null;
+      }
+      const mask = paintLayer.mask;
+      if (!mask.image) {
+        if (surfaceRef.current && surfaceSrc.current === null) return;
+        const s = new RasterSurface(
+          Math.max(1, Math.round(paintLayer.size.w)),
+          Math.max(1, Math.round(paintLayer.size.h))
+        );
+        const v = mask.fill / 255;
+        s.fill({ r: v, g: v, b: v, a: 1 });
+        surfaceRef.current = s;
+        surfaceSrc.current = null;
+        return;
+      }
+      if (surfaceSrc.current === mask.image) return;
+      if (surfaceSrc.current && surfaceSrc.current === pendingImageRef.current) return;
+      let cancelled = false;
+      const src = mask.image;
+      RasterSurface.fromLayer({ ...paintLayer, image: src })
+        .then((s) => {
+          if (cancelled) return;
+          surfaceRef.current = s;
+          surfaceSrc.current = src;
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }
+
     // Adjustment layers have no pixels to paint.
-    if (!paintLayer || paintLayer.adjust) return;
+    if (paintLayer.adjust) return;
 
     if (!paintLayer.image && !paintLayer.strokes?.length) {
       if (paintLayer.size.w !== BLANK_SIZE || paintLayer.size.h !== BLANK_SIZE) {
@@ -469,7 +527,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, paintLayer, commit]);
+  }, [activeTool, paintLayer, commit, maskMode]);
 
   /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
   const toLocal = useCallback((cx: number, cy: number) => {
@@ -481,8 +539,9 @@ const commit = useCallback((next: Frame) => {
   const surfaceReady = () =>
     !!surfaceRef.current &&
     !!paintLayer &&
-    !paintLayer.strokes?.length &&
-    (surfaceSrc.current === paintLayer.image || surfaceSrc.current === pendingImageRef.current);
+    surfaceLayerRef.current === surfaceKey &&
+    (maskMode || !paintLayer.strokes?.length) &&
+    (surfaceSrc.current === surfaceImage || surfaceSrc.current === pendingImageRef.current);
 
   /**
    * Live preview while a stroke is in progress: the normal composite, with the
@@ -500,12 +559,13 @@ const commit = useCallback((next: Frame) => {
 
     const f = editRef.current;
 
-    // Material brush: the working surface stands in for the layer's pixels, so
-    // the stroke shows in its place in the stack, with its blend and opacity.
-    if (stroke) {
+    // Material brush (and anything on a mask): the working surface stands in
+    // for the layer's pixels or mask, so the stroke shows in its place in the
+    // stack, with its blend, opacity and mask.
+    if (stroke || (live && maskMode)) {
       const surface = surfaceRef.current;
       if (!surface) return;
-      stroke.previewInto();
+      stroke?.previewInto();
       let scratch = scratchRef.current;
       if (!scratch) {
         scratch = document.createElement("canvas");
@@ -518,10 +578,13 @@ const commit = useCallback((next: Frame) => {
       const { data } = surface.toImageData();
       const px = new Uint8ClampedArray(new ArrayBuffer(data.length));
       px.set(data);
-      sctx.putImageData(new ImageData(px, surface.width, surface.height), 0, 0);
+      const img = new ImageData(px, surface.width, surface.height);
+      if (live) renderMaskStroke(img, live.stroke);
+      sctx.putImageData(img, 0, 0);
 
       const dom = domResolver();
-      const liveId = paintLayer.id;
+      // A mask preview answers for the mask; a pixel preview for the layer.
+      const liveId = maskMode ? `${paintLayer.id}#mask` : paintLayer.id;
       const resolve: BitmapResolver = (l) =>
         l.id === liveId
           ? { layerId: liveId, image: scratch!, width: scratch!.width, height: scratch!.height }
@@ -532,9 +595,15 @@ const commit = useCallback((next: Frame) => {
         ctx,
         {
           ...f,
-          // Any non-null image makes the (maybe blank) layer render; the
-          // resolver hands back the live surface for it.
-          layers: f.layers.map((l) => (l.id === liveId ? { ...l, image: "live" } : l)),
+          // Any non-null image makes the (maybe blank) layer or mask render;
+          // the resolver hands back the live surface for it.
+          layers: f.layers.map((l) =>
+            l.id !== paintLayer.id
+              ? l
+              : maskMode && l.mask
+                ? { ...l, mask: { ...l.mask, image: "live" } }
+                : { ...l, image: "live" }
+          ),
         },
         CANVAS_SIZE,
         { background, resolve, checkerboard: true }
@@ -564,7 +633,7 @@ const commit = useCallback((next: Frame) => {
       CANVAS_SIZE,
       { background, resolve: domResolver(), checkerboard: true }
     );
-  }, [paintLayer, background]);
+  }, [paintLayer, background, maskMode]);
 
   const schedulePreview = useCallback(() => {
     if (!previewRaf.current) {
@@ -579,7 +648,20 @@ const commit = useCallback((next: Frame) => {
     []
   );
 
-  /** Write the surface back into the layer being painted. */
+  /** A pencil or eraser stroke drawn into mask pixels (layer space, 1:1). */
+  function renderMaskStroke(
+    img: { data: Uint8ClampedArray; width: number; height: number },
+    stroke: PencilStroke
+  ): void {
+    renderStrokes(img, 0, 0, [stroke], {
+      matrix: MAT_IDENTITY,
+      surfaceW: img.width,
+      surfaceH: img.height,
+      clip: null,
+    });
+  }
+
+  /** Write the surface back into the layer being painted (or its mask). */
   const commitSurface = useCallback(() => {
     const surface = surfaceRef.current;
     if (!surface || !paintLayer) return;
@@ -597,11 +679,17 @@ const commit = useCallback((next: Frame) => {
         const f = editRef.current;
         commit({
           ...f,
-          layers: f.layers.map((l) => (l.id === paintLayer.id ? { ...l, image: out.image } : l)),
+          layers: f.layers.map((l) =>
+            l.id !== paintLayer.id
+              ? l
+              : maskMode && l.mask
+                ? { ...l, mask: { ...l.mask, image: out.image } }
+                : { ...l, image: out.image }
+          ),
           flattenKey: null,
         });
       });
-  }, [paintLayer, commit]);
+  }, [paintLayer, commit, maskMode]);
 
   /** One pointer sample in base-layer pixels. Takes a React event or a native (coalesced) one. */
   const pointSample = (
@@ -694,14 +782,16 @@ const commit = useCallback((next: Frame) => {
     }
 
     const local = toLocal(p.x, p.y);
-    if (!local || !paintLayer || paintLayer.locked || paintLayer.adjust) return true;
+    if (!local || !paintLayer || paintLayer.locked) return true;
+    if (paintLayer.adjust && !maskMode) return true;
+    const lockAlpha = !maskMode && !!paintLayer.alphaLock;
 
     if (activeTool === "fill") {
       if (!surfaceReady()) return true;
       const surface = surfaceRef.current!;
-      const color = parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 };
+      const color = paintRGBA();
       onHistoryCommit?.();
-      const before = paintLayer.alphaLock ? surface.data.slice() : null;
+      const before = lockAlpha ? surface.data.slice() : null;
       const res = floodFill(surface, {
         seed: local,
         color,
@@ -719,7 +809,9 @@ const commit = useCallback((next: Frame) => {
     }
 
     // Alpha lock keeps every pixel's alpha, so the eraser has nothing to do.
-    if (activeTool === "eraser" && paintLayer.alphaLock) return true;
+    if (activeTool === "eraser" && lockAlpha) return true;
+    // Mask strokes are baked into the mask's pixels on pen-up.
+    if (maskMode && !surfaceReady()) return true;
 
     // pencil / eraser: record the stroke's physics
     onHistoryCommit?.();
@@ -729,7 +821,7 @@ const commit = useCallback((next: Frame) => {
       if (!surfaceReady()) return true;
       strokeRef.current = new MaterialStroke(surfaceRef.current!, {
         brush: brushSpecNow,
-        color: parseHex(paintColor) ?? { r: 0, g: 0, b: 0, a: 1 },
+        color: paintRGBA(),
         radius: brushNow.size / scale,
         intensity: brushNow.intensity,
         material: brushNow.material,
@@ -738,7 +830,7 @@ const commit = useCallback((next: Frame) => {
         // a mouse or finger gets the brush's own stand-in
         hasPressure: reportsPressure(e),
         scale,
-        lockAlpha: paintLayer.alphaLock,
+        lockAlpha,
       });
       strokeRef.current.addSample(pointSample(e, local));
       schedulePreview();
@@ -746,11 +838,12 @@ const commit = useCallback((next: Frame) => {
     }
     const stroke: PencilStroke & { pts: number[] } = {
       id: createStrokeId(),
-      kind: activeTool === "eraser" ? "erase" : "graphite",
-      color: paintColor,
+      // On a mask the eraser paints the hiding grey, the pencil the paint grey.
+      kind: activeTool === "eraser" && !maskMode ? "erase" : "graphite",
+      color: maskMode ? toHex(paintRGBA(activeTool === "eraser")) : paintColor,
       size: brushSize / scale,
       seed: paintLayer.strokes?.[0]?.seed ?? seedFromString(paintLayer.id),
-      ...(paintLayer.alphaLock && { lockAlpha: true }),
+      ...(lockAlpha && { lockAlpha: true }),
       pts: [],
     };
     markLiveStroke(stroke);
@@ -836,6 +929,16 @@ const commit = useCallback((next: Frame) => {
       return true;
     }
     const done: PencilStroke = { ...live.stroke, pts: live.stroke.pts.slice() };
+    if (maskMode) {
+      const surface = surfaceRef.current;
+      if (!surface) return true;
+      const { data } = surface.toImageData();
+      const img = { data: new Uint8ClampedArray(data), width: surface.width, height: surface.height };
+      renderMaskStroke(img, done);
+      surfaceRef.current = RasterSurface.fromImageData(img.data, img.width, img.height);
+      commitSurface();
+      return true;
+    }
     const f = editRef.current;
     commit({
       ...f,
@@ -1058,7 +1161,7 @@ const commit = useCallback((next: Frame) => {
     const pending = [
       ...frame.layers,
       ...(previousFrame?.layers ?? []),
-    ].filter((l) => l.image && l.visible);
+    ].filter((l) => (l.image || l.mask?.image) && l.visible);
 
     if (!pending.length) return;
 

@@ -40,6 +40,11 @@ export function layerStateKey(layers: readonly Layer[]): string {
       l.blend,
       l.clip ? "c" : "-",
       l.adjust ? JSON.stringify(l.adjust) : "-",
+      l.mask
+        ? `m${l.mask.enabled ? 1 : 0}${l.mask.inverted ? 1 : 0}${l.mask.fill}:${
+            l.mask.image ? `${l.mask.image.length}:${l.mask.image.slice(-32)}` : "-"
+          }`
+        : "-",
       `${l.size.w}x${l.size.h}`,
       l.crop ? `${l.crop.x},${l.crop.y},${l.crop.w},${l.crop.h}` : "-",
       roundTo(l.pose.position.x, 4).toString(),
@@ -196,8 +201,10 @@ export function domResolver(): BitmapResolver {
 export async function preloadFrameBitmaps(layers: readonly Layer[]): Promise<void> {
   await Promise.all(
     layers
-      .filter((l) => l.image && l.visible)
-      .map((l) => loadBitmap(l.image as string).catch(() => null))
+      .filter((l) => l.visible)
+      .flatMap((l) => [l.image, l.mask?.image])
+      .filter((src): src is string => !!src)
+      .map((src) => loadBitmap(src).catch(() => null))
   );
 }
 
