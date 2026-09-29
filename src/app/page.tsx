@@ -53,6 +53,7 @@ import {
 import { loadHistory, saveHistory, clearHistory } from "@/lib/history";
 import type { Snapshot } from "@/types/history";
 import { layerReducer, type LayerAction } from "@/lib/layers/editor";
+import { BLANK_LAYER_SIZE } from "@/lib/layers/constants";
 import {
   createBlankFrame,
   duplicateFrame,
@@ -927,6 +928,19 @@ const frames = activeProject?.frames.length
       reader.readAsDataURL(file);
     });
 
+  /** One blank layer on every frame, same name everywhere; one undo step.
+   *  Frames already at the layer limit are left as they are. */
+  const addBlankLayerAllFrames = () => {
+    const name = `Layer ${editFrame.layers.length}`;
+    const size = { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE };
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f) =>
+        layerReducer(f, { type: "layer/add", image: null, size, name })
+      ),
+    }));
+  };
+
   const handleImport = (file: File) => {
   setIsPlaying(false);
 
@@ -1142,6 +1156,7 @@ const deleteProject = useCallback(
             onAddImage={() =>
               openPicker({ kind: "new-layer", frame: editingIndex })
             }
+            onAddBlankAllFrames={addBlankLayerAllFrames}
           />
         )}
 
