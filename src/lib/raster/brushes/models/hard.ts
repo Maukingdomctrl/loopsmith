@@ -38,25 +38,24 @@ export interface HardMaterial {
 }
 
 export const MATERIALS: Record<string, HardMaterial> = {
-  // even and clean: width follows pressure from a hairline at a whisper to full
-  // width; a light touch is a thin line that stays dark and crisp, only a
-  // little lighter
+  // even and clean: width follows pressure closely and linearly, from a hairline
+  // at a whisper to full width; a light touch is also a lighter line
   pen: {
-    width: { from: 0.02, to: 1, gamma: 1.4 },
-    opacity: { from: 0.5, to: 1, gamma: 0.6 },
+    width: { from: 0.02, to: 1, gamma: 1.25 },
+    opacity: { from: 0.06, to: 1, gamma: 1.1 },
     grain: 0,
   },
   // sharp graphite: pressure changes width AND how much lead is laid down
   pencil: {
     width: { from: 0.12, to: 1, gamma: 1.2 },
-    opacity: { from: 0.35, to: 1, gamma: 0.8 },
+    opacity: { from: 0.2, to: 1, gamma: 1.1 },
     grain: 0.55,
   },
   // brush pen: a hairline at a whisper, little until pressed, then a heavy swell;
-  // light strokes are fine dark hairlines, pressed ones solid
+  // light strokes come out soft grey, pressed ones solid
   ink: {
     width: { from: 0.015, to: 1, gamma: 1.9, ease: 0.2 },
-    opacity: { from: 0.45, to: 1, gamma: 0.6 },
+    opacity: { from: 0.08, to: 1, gamma: 1 },
     grain: 0,
   },
 };

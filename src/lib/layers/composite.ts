@@ -134,7 +134,8 @@ export function compositeLayers(
   ctx.clearRect(0, 0, surface, surface);
 
   if (options.drawCheckerboard && background.checkerboard && background.transparent) {
-    drawCheckerboard(ctx, surface);
+    // Hi-DPI views keep the same on-screen checker size.
+    drawCheckerboard(ctx, surface, CHECKER_SIZE * Math.max(1, surface / CANVAS_SIZE));
   }
 
   // Opaque background is DOCUMENT state and is therefore exported.

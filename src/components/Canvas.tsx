@@ -204,6 +204,22 @@ export default function Canvas({
   guideMode,
 }: CanvasProps) {
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
+  /**
+   * Backing pixels of the main canvas: the 512 canvas at the SCREEN's real
+   * resolution (2× on Retina / iPad), so thin lines are drawn at device pixels
+   * instead of being stretched by the browser. The old transparency mask is a
+   * 512 grid, so it keeps the canvas at 512.
+   */
+  const [screenDpr, setScreenDpr] = useState(1);
+  useEffect(() => {
+    const read = () => setScreenDpr(Math.min(3, Math.max(1, window.devicePixelRatio || 1)));
+    read();
+    window.addEventListener("resize", read);
+    return () => window.removeEventListener("resize", read);
+  }, []);
+  const viewPx = frame.transparency ? CANVAS_SIZE : Math.round(CANVAS_SIZE * screenDpr);
+  const viewPxRef = useRef(viewPx);
+  viewPxRef.current = viewPx;
   const onionCanvasRef = useRef<HTMLCanvasElement>(null);
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -508,21 +524,23 @@ const commit = useCallback((next: Frame) => {
       px.set(data);
       sctx.putImageData(new ImageData(px, surface.width, surface.height), 0, 0);
 
+      const vp = viewPxRef.current;
+      const k = vp / CANVAS_SIZE;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      ctx.clearRect(0, 0, vp, vp);
       drawFrameLayers(
         ctx,
         {
           ...f,
           layers: f.layers.map((l) => (l.id === base.id ? { ...l, visible: false } : l)),
         },
-        CANVAS_SIZE,
+        vp,
         { background, resolve: domResolver(), checkerboard: true }
       );
       const m = baseLayerMatrix(f);
       if (!m) return;
       ctx.save();
-      ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+      ctx.setTransform(m.a * k, m.b * k, m.c * k, m.d * k, m.e * k, m.f * k);
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(scratch, 0, 0);
@@ -539,8 +557,9 @@ const commit = useCallback((next: Frame) => {
       setTipPressure((cur) => (cur === q ? cur : q));
     }
 
+    const vp = viewPxRef.current;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    ctx.clearRect(0, 0, vp, vp);
     drawFrameLayers(
       ctx,
       {
@@ -549,7 +568,7 @@ const commit = useCallback((next: Frame) => {
           l.id === base.id ? { ...l, strokes: [...(l.strokes ?? []), live.stroke] } : l
         ),
       },
-      CANVAS_SIZE,
+      vp,
       { background, resolve: domResolver(), checkerboard: true }
     );
   }, [base, background]);
@@ -671,9 +690,11 @@ const commit = useCallback((next: Frame) => {
     if (activeTool === "picker") {
       const ctx = baseCanvasRef.current?.getContext("2d");
       if (ctx) {
+        const vp = viewPxRef.current;
+        const k = vp / CANVAS_SIZE;
         const d = ctx.getImageData(
-          Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(p.x))),
-          Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(p.y))),
+          Math.max(0, Math.min(vp - 1, Math.floor(p.x * k))),
+          Math.max(0, Math.min(vp - 1, Math.floor(p.y * k))),
           1,
           1
         ).data;
@@ -1121,9 +1142,9 @@ const commit = useCallback((next: Frame) => {
 
   // Always repaint from a clean surface.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  ctx.clearRect(0, 0, viewPx, viewPx);
 
-  drawFrameLayers(ctx, frame, CANVAS_SIZE, {
+  drawFrameLayers(ctx, frame, viewPx, {
     background,
     resolve: domResolver(),
     checkerboard: true,
@@ -1147,6 +1168,7 @@ const commit = useCallback((next: Frame) => {
       frame.layers,
       frame.crop,
       frame.transparency,
+      viewPx,
       frame.stab?.dx,
       frame.stab?.dy,
       background,
@@ -1262,8 +1284,19 @@ const commit = useCallback((next: Frame) => {
   const createSelection = useCallback(() => {
     if (!lassoAvailable) return;
 
-    const source = baseCanvasRef.current;
-    if (!source || points.length < 3) return;
+    const viewCanvas = baseCanvasRef.current;
+    if (!viewCanvas || points.length < 3) return;
+    // The lasso works in 512 canvas px: a 512 copy of the (possibly hi-DPI) view.
+    const source = document.createElement("canvas");
+    source.width = CANVAS_SIZE;
+    source.height = CANVAS_SIZE;
+    {
+      const c = source.getContext("2d");
+      if (!c) return;
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = "high";
+      c.drawImage(viewCanvas, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    }
 
     const srcCtx = source.getContext("2d");
     if (!srcCtx) return;
@@ -1918,8 +1951,8 @@ onPointerCancel={(e) => {
             
             <canvas
   ref={baseCanvasRef}
-  width={CANVAS_SIZE}
-  height={CANVAS_SIZE}
+  width={viewPx}
+  height={viewPx}
   className="absolute inset-0 h-full w-full"
   style={{ imageRendering: "pixelated" }}
   onPointerDown={(e) => {
