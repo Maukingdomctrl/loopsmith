@@ -26,7 +26,7 @@ import { rectIsEmpty, rectNormalize } from "@/lib/geometry/rect";
 import { layerContentBox, layerMatrix } from "./layerSpace";
 import type { Mat2D } from "@/types/geometry";
 import type { PencilStroke } from "@/lib/pencil/types";
-import { renderStrokes, strokesBounds } from "@/lib/pencil/render";
+import { LiveStrokeRaster, renderStrokes, strokesBounds } from "@/lib/pencil/render";
 
 export type Surface2D =
   | CanvasRenderingContext2D
@@ -289,6 +289,37 @@ export function onStrokeRefine(cb: () => void): () => void {
 
 /** Strokes still being drawn: rendered, never cached. */
 const liveStrokes = new WeakSet<PencilStroke>();
+
+/** The stroke being drawn: rendered incrementally into its own canvas. */
+let live: {
+  stroke: PencilStroke;
+  key: string;
+  raster: LiveStrokeRaster;
+  surface: { ctx: Surface2D; canvas: HTMLCanvasElement | OffscreenCanvas };
+} | null = null;
+
+function liveStrokeCanvas(
+  stroke: PencilStroke, matrix: Mat2D, surface: number, clip: Rect
+): HTMLCanvasElement | OffscreenCanvas | null {
+  const m = matrix;
+  const key = `${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${surface}|${clip.x},${clip.y},${clip.w},${clip.h}`;
+  if (!live || live.stroke !== stroke || live.key !== key) {
+    const buf = createSurface(surface);
+    if (!buf) return null;
+    live = {
+      stroke,
+      key,
+      raster: new LiveStrokeRaster(stroke, { matrix, surfaceW: surface, surfaceH: surface, clip }),
+      surface: buf,
+    };
+  }
+  const up = live.raster.update();
+  if (up) {
+    const img = new ImageData(up.data as Uint8ClampedArray<ArrayBuffer>, up.w, up.h);
+    (live.surface.ctx as CanvasRenderingContext2D).putImageData(img, up.x0, up.y0);
+  }
+  return live.surface.canvas;
+}
 export const markLiveStroke = (s: PencilStroke) => liveStrokes.add(s);
 
 function isPrefix(a: readonly PencilStroke[], b: readonly PencilStroke[]): boolean {
@@ -369,7 +400,16 @@ function layerWithStrokes(
     iso.ctx.restore();
   }
 
-  const b = strokesBounds(todo, matrix);
+  const liveOnly = todo.length === 1 && liveStrokes.has(todo[0]);
+  const liveCanvas = liveOnly ? liveStrokeCanvas(todo[0], matrix, surface, box) : null;
+  if (liveCanvas) {
+    // Same result as renderStrokes: colour over, or (erase) alpha removed.
+    iso.ctx.save();
+    iso.ctx.globalCompositeOperation = todo[0].kind === "erase" ? "destination-out" : "source-over";
+    iso.ctx.drawImage(liveCanvas as CanvasImageSource, 0, 0);
+    iso.ctx.restore();
+  }
+  const b = liveCanvas ? null : strokesBounds(todo, matrix);
   if (b) {
     const x0 = Math.max(0, b.x0), y0 = Math.max(0, b.y0);
     const x1 = Math.min(surface, b.x1), y1 = Math.min(surface, b.y1);
