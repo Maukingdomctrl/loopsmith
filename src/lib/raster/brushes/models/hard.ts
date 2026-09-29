@@ -14,9 +14,9 @@
  * end disc, so the union is seamless: no scallops, no beads, no gaps, and a
  * width that changes as smoothly as the pressure does.
  *
- * "Hard" is not opacity. The edge is a one-pixel analytic anti-alias at any
- * width, so a hairline and a thick line are equally crisp; what pressure changes
- * is how wide the ink actually is.
+ * "Hard" is the edge: a one-pixel analytic anti-alias at any width, so a
+ * hairline and a thick line are equally crisp. Pressure changes how wide the
+ * ink is and how dark: a light touch gives a thin, softer grey line.
  */
 
 import type { Rect } from "@/types/geometry";
@@ -38,11 +38,11 @@ interface HardMaterial {
 }
 
 const MATERIALS: Record<string, HardMaterial> = {
-  // even, fully opaque, mathematically clean: width follows pressure closely and
-  // linearly, from a hairline at a whisper to full width — no swell, no taper
+  // even and clean: width follows pressure closely and linearly, from a hairline
+  // at a whisper to full width; a light touch is also a lighter line
   pen: {
     width: { from: 0.07, to: 1, gamma: 0.9 },
-    opacity: { from: 1, to: 1, gamma: 1 },
+    opacity: { from: 0.4, to: 1, gamma: 0.7 },
     grain: 0,
   },
   // sharp graphite: pressure changes width AND how much lead is laid down
@@ -51,10 +51,11 @@ const MATERIALS: Record<string, HardMaterial> = {
     opacity: { from: 0.5, to: 1, gamma: 0.85 },
     grain: 0.55,
   },
-  // brush pen: a hairline at a whisper, little until pressed, then a heavy swell
+  // brush pen: a hairline at a whisper, little until pressed, then a heavy swell;
+  // light strokes come out soft grey, pressed ones solid
   ink: {
     width: { from: 0.035, to: 1, gamma: 1.6, ease: 0.3 },
-    opacity: { from: 1, to: 1, gamma: 1 },
+    opacity: { from: 0.35, to: 1, gamma: 0.8 },
     grain: 0,
   },
 };
