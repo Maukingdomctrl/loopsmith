@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown, RectangleCircle, Contrast, X } from "lucide-react";
 
 import type { Adjustment, AdjustmentType, BlendMode, ColorBalanceTone, Layer, LayerSelection } from "@/types/layer";
 import { ADJUSTMENT_LABELS, BLEND_LABELS, BLEND_MODES } from "@/types/layer";
@@ -30,13 +30,16 @@ interface Props {
   onAddAdjustment?: (type: AdjustmentType) => void;
   /** Open one undo step; called when a slider drag starts. */
   onBeginEdit?: () => void;
+  /** Paint tools target the selected layer's mask. */
+  editMask?: boolean;
+  onEditMaskChange?: (v: boolean) => void;
 }
 
 const ADJUSTMENT_TYPES: readonly AdjustmentType[] = ["brightnessContrast", "hueSaturation", "colorBalance"];
 
 export default function LayerPanel({
   layers, selection, disabled, onSelect, dispatch, onAddImage, onAddBlankAllFrames,
-  onAddAdjustment, onBeginEdit,
+  onAddAdjustment, onBeginEdit, editMask = false, onEditMaskChange,
 }: Props) {
   const [adjustMenu, setAdjustMenu] = useState(false);
   // Reverse for display only. The index handed back to `moveLayer` is always
@@ -151,12 +154,13 @@ export default function LayerPanel({
               onDragStart={() => { dragFrom.current = layer.id; }}
               onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
               onDrop={(e) => { e.preventDefault(); handleDrop(layer.id); }}
-              onClick={(e) =>
+              onClick={(e) => {
                 onSelect(
                   layer.id,
                   e.shiftKey ? "range" : e.metaKey || e.ctrlKey ? "toggle" : "replace"
-                )
-              }
+                );
+                onEditMaskChange?.(false);
+              }}
               className={`flex cursor-pointer items-center gap-2 border-b border-white/5 px-2 py-1.5 text-xs ${
                 isSelected ? "bg-indigo-500/20" : "hover:bg-zinc-800/60"
               } ${primary === layer.id ? "ring-1 ring-inset ring-indigo-400" : ""}`}
@@ -178,7 +182,11 @@ export default function LayerPanel({
                   <CornerLeftDown size={12} />
                 </span>
               )}
-              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded border border-zinc-700 bg-[#1b1f28]">
+              <div
+                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded border bg-[#1b1f28] ${
+                  layer.mask && primary === layer.id && !editMask ? "border-white" : "border-zinc-700"
+                }`}
+              >
                 {layer.adjust ? (
                   <SlidersHorizontal size={14} className="text-zinc-400" />
                 ) : (
@@ -187,6 +195,36 @@ export default function LayerPanel({
                   )
                 )}
               </div>
+              {layer.mask && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelect(layer.id);
+                    onEditMaskChange?.(true);
+                  }}
+                  disabled={disabled}
+                  title="Layer mask: click to paint on it (white shows, black hides)"
+                  className={`relative -ml-1 h-8 w-8 flex-shrink-0 overflow-hidden rounded border ${
+                    primary === layer.id && editMask ? "border-white" : "border-zinc-700"
+                  }`}
+                  style={{
+                    background:
+                      (layer.mask.fill === 255) !== layer.mask.inverted ? "#ffffff" : "#000000",
+                  }}
+                >
+                  {layer.mask.image && (
+                    <img
+                      src={layer.mask.image}
+                      alt=""
+                      className="h-full w-full object-contain"
+                      style={layer.mask.inverted ? { filter: "invert(1)" } : undefined}
+                    />
+                  )}
+                  {!layer.mask.enabled && (
+                    <X size={30} className="absolute inset-0 m-auto text-red-500" />
+                  )}
+                </button>
+              )}
 
               <div className="min-w-0 flex-1">
                 {renamingId === layer.id ? (
@@ -331,6 +369,49 @@ export default function LayerPanel({
             <Grid2x2Check size={12} />
             Lock transparent pixels
           </button>
+          )}
+
+          {!primaryLayer.mask ? (
+            <button
+              onClick={(e) =>
+                dispatch({ type: "layer/maskAdd", id: primaryLayer.id, hideAll: e.altKey })
+              }
+              disabled={disabled || primaryLayer.locked}
+              title="Add layer mask (Alt-click: a mask that hides everything)"
+              className="flex w-full items-center gap-2 rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-700 disabled:opacity-40"
+            >
+              <RectangleCircle size={12} />
+              Add mask
+            </button>
+          ) : (
+            <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+              <RectangleCircle size={12} />
+              <span className="flex-1">Mask</span>
+              <button
+                onClick={() =>
+                  dispatch({ type: "layer/maskSet", id: primaryLayer.id, patch: { inverted: !primaryLayer.mask!.inverted } })
+                }
+                disabled={disabled || primaryLayer.locked}
+                title="Invert mask"
+                className="rounded bg-zinc-800 p-1 hover:bg-zinc-700 disabled:opacity-40"
+              ><Contrast size={12} /></button>
+              <button
+                onClick={() =>
+                  dispatch({ type: "layer/maskSet", id: primaryLayer.id, patch: { enabled: !primaryLayer.mask!.enabled } })
+                }
+                disabled={disabled || primaryLayer.locked}
+                title={primaryLayer.mask.enabled ? "Turn mask off" : "Turn mask on"}
+                className={`rounded p-1 disabled:opacity-40 ${
+                  primaryLayer.mask.enabled ? "bg-zinc-800 hover:bg-zinc-700" : "bg-red-900/60 text-white"
+                }`}
+              >{primaryLayer.mask.enabled ? <Eye size={12} /> : <EyeOff size={12} />}</button>
+              <button
+                onClick={() => dispatch({ type: "layer/maskDelete", id: primaryLayer.id })}
+                disabled={disabled || primaryLayer.locked}
+                title="Delete mask"
+                className="rounded bg-zinc-800 p-1 hover:bg-red-700 disabled:opacity-40"
+              ><Trash2 size={12} /></button>
+            </div>
           )}
 
           <div className="flex gap-1">

@@ -108,17 +108,35 @@ export function isIdentityAdjustment(a: Adjustment): boolean {
   }
 }
 
-/** Apply `adj` in place to straight RGBA bytes. */
-export function applyAdjustment(data: Uint8ClampedArray, adj: Adjustment, amount: number): void {
-  const k = clamp01(amount);
-  if (k <= 0 || isIdentityAdjustment(adj)) return;
+/**
+ * Apply `adj` in place to straight RGBA bytes. `weights` (optional, RGBA bytes
+ * of the same size) scales the strength per pixel by its alpha: a layer mask.
+ */
+export function applyAdjustment(
+  data: Uint8ClampedArray,
+  adj: Adjustment,
+  amount: number,
+  weights?: Uint8ClampedArray
+): void {
+  const k0 = clamp01(amount);
+  if (k0 <= 0 || isIdentityAdjustment(adj)) return;
   const n = data.length;
+  let k = k0;
   const mix = (orig: number, v: number) => orig + (v - orig) * k;
+  // Per-pixel strength; false = nothing to do at this pixel.
+  const at = (i: number): boolean => {
+    if (data[i + 3] === 0) return false;
+    if (weights) {
+      k = (k0 * weights[i + 3]) / 255;
+      if (k <= 0) return false;
+    }
+    return true;
+  };
 
   if (adj.type === "brightnessContrast") {
     const lut = brightnessContrastLut(adj.brightness, adj.contrast);
     for (let i = 0; i < n; i += 4) {
-      if (data[i + 3] === 0) continue;
+      if (!at(i)) continue;
       data[i] = mix(data[i], lut[data[i]]);
       data[i + 1] = mix(data[i + 1], lut[data[i + 1]]);
       data[i + 2] = mix(data[i + 2], lut[data[i + 2]]);
@@ -136,7 +154,7 @@ export function applyAdjustment(data: Uint8ClampedArray, adj: Adjustment, amount
     const satMul = sat >= 0 ? 1 + 3 * sat : 1 + sat;
     const light = adj.lightness / 100;
     for (let i = 0; i < n; i += 4) {
-      if (data[i + 3] === 0) continue;
+      if (!at(i)) continue;
       rgbToHsl(data[i] / 255, data[i + 1] / 255, data[i + 2] / 255, hsl);
       let h = hsl[0] + dh;
       h -= Math.floor(h);
@@ -154,7 +172,7 @@ export function applyAdjustment(data: Uint8ClampedArray, adj: Adjustment, amount
   // Colour balance, luminosity preserved (Photoshop's default).
   const luts = colorBalanceLuts(adj.shadows, adj.midtones, adj.highlights);
   for (let i = 0; i < n; i += 4) {
-    if (data[i + 3] === 0) continue;
+    if (!at(i)) continue;
     const r = data[i], g = data[i + 1], b = data[i + 2];
     rgbToHsl(r / 255, g / 255, b / 255, hsl);
     const l0 = hsl[2];

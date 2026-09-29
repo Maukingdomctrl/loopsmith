@@ -115,6 +115,8 @@ export default function Home() {
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectionActive, setSelectionActive] = useState(false);
+  /** Paint tools target the selected layer's mask (its thumbnail is picked). */
+  const [editMask, setEditMask] = useState(false);
   const [previewFrame, setPreviewFrame] = useState(0);
   const [onionSkin, setOnionSkin] = useState(true);
   const [showProjects, setShowProjects] = useState(false);
@@ -977,7 +979,13 @@ const frames = activeProject?.frames.length
    * copy. Toggles are one undo step each; slider drags one per drag.
    */
   const dispatchLayerPanel = (action: LayerAction) => {
+    // A new mask is where painting goes next, as in Photoshop.
+    if (action.type === "layer/maskAdd") setEditMask(true);
+    if (action.type === "layer/maskDelete") setEditMask(false);
     const linked =
+      action.type === "layer/maskAdd" ||
+      action.type === "layer/maskSet" ||
+      action.type === "layer/maskDelete" ||
       action.type === "layer/blend" ||
       action.type === "layer/alphaLock" ||
       action.type === "layer/clip" ||
@@ -1177,6 +1185,7 @@ const deleteProject = useCallback(
 
         <Canvas
           projectId={activeProject?.id ?? ""}
+          editMask={editMask}
           containerRef={canvasContainerRef}
           background={background}
           transparency={transparency}
@@ -1224,6 +1233,8 @@ const deleteProject = useCallback(
             }
             onAddBlankAllFrames={addBlankLayerAllFrames}
             onAddAdjustment={addAdjustmentLayer}
+            editMask={editMask}
+            onEditMaskChange={setEditMask}
             onBeginEdit={handleHistoryCommit}
           />
         )}
