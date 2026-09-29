@@ -205,10 +205,11 @@ export default function Canvas({
 }: CanvasProps) {
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
   /**
-   * Backing pixels of the main canvas: the 512 canvas at the SCREEN's real
-   * resolution (2× on Retina / iPad), so thin lines are drawn at device pixels
-   * instead of being stretched by the browser. The old transparency mask is a
-   * 512 grid, so it keeps the canvas at 512.
+   * Backing pixels of the main canvas: the 512 canvas at the screen's real
+   * resolution, and at least 2×. The browser scales it smoothly onto the
+   * screen (Windows display scaling, half-pixel positions), so edges stay
+   * clean instead of stair-stepped. The old transparency mask is a 512 grid,
+   * so it keeps the canvas at 512.
    */
   const [screenDpr, setScreenDpr] = useState(1);
   useEffect(() => {
@@ -217,7 +218,7 @@ export default function Canvas({
     window.addEventListener("resize", read);
     return () => window.removeEventListener("resize", read);
   }, []);
-  const viewPx = frame.transparency ? CANVAS_SIZE : Math.round(CANVAS_SIZE * screenDpr);
+  const viewPx = frame.transparency ? CANVAS_SIZE : Math.round(CANVAS_SIZE * Math.max(2, screenDpr));
   const viewPxRef = useRef(viewPx);
   viewPxRef.current = viewPx;
   const onionCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -1954,7 +1955,7 @@ onPointerCancel={(e) => {
   width={viewPx}
   height={viewPx}
   className="absolute inset-0 h-full w-full"
-  style={{ imageRendering: "pixelated" }}
+  style={{ imageRendering: "auto" }}
   onPointerDown={(e) => {
     if (paintDown(e)) return;
 
@@ -2040,7 +2041,7 @@ onPointerCancel={(e) => {
               width={CANVAS_SIZE}
               height={CANVAS_SIZE}
               className="pointer-events-none absolute inset-0 h-full w-full opacity-30"
-              style={{ imageRendering: "pixelated" }}
+              style={{ imageRendering: "auto" }}
             />
 
             {points.length > 0 && (
