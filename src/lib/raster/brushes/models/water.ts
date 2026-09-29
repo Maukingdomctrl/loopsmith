@@ -219,7 +219,7 @@ export class WaterModel implements BrushModel {
     const drying = mix(WATER_TUNING.waterEnd, 1, Math.exp(-travelled / WATER_TUNING.waterRun));
     // the brush does not release evenly: a slow, smooth swell of loading
     const pulse = 1 + 0.9 * (valueNoise1(inp.distance / (5 * inp.size + 6), this.ctx.seed) - 0.5);
-    const fast = smoothstep(0, 2.2, inp.velocity);
+    const fast = smoothstep(0, 6, inp.velocity); // canvas px per ms: only a flick counts as fast
     const speedWater = mix(1.12, 0.55, fast);
 
     const scale = (ds * gain) / chord;
