@@ -117,8 +117,8 @@ const ENVELOPE = 0.65;
 
 /** Slow strokes lay down more, fast ones less (canvas px/ms). */
 const SPEED_SLOW_GAIN = 1.25;
-const SPEED_FAST_GAIN = 0.7;
-const SPEED_SPAN = 2.2;
+const SPEED_FAST_GAIN = 0.85;
+const SPEED_SPAN = 6; // canvas px per ms: normal drawing (1-3) stays dense, only a flick breaks up
 
 const SPACING_OF_RADIUS = 0.22;
 const MIN_SPACING = 0.3;

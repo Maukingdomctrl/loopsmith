@@ -8,6 +8,10 @@
  * `mouse` is each brush's stand-in for pressure on a device that has none. It
  * is not decoration: it is what lets a mouse user feel the difference between
  * a soft airbrush, a technical pen and an ink brush.
+ *
+ * Speed only lightens a stroke a little, and only for a real flick (speedRef is
+ * in canvas px per ms; ordinary mouse drawing runs at 1-3). Stronger speed
+ * fading made every normal-speed mouse stroke come out pale grey.
  */
 
 import type { BrushId, BrushPrefs, BrushSpec, MouseDynamics } from "./types";
@@ -36,7 +40,7 @@ export const BRUSHES: readonly BrushSpec[] = [
     intensityLabel: "Intensity",
     smoothing: 0.3,
     mouse: mouse({
-      base: 0.72, speedInfluence: 0.3, speedRef: 2,
+      base: 0.92, speedInfluence: 0.1, speedRef: 6,
       ramp: 1.2, rampFrom: 0.3, taper: 1.5, taperTo: 0.35,
     }),
   },
@@ -55,7 +59,7 @@ export const BRUSHES: readonly BrushSpec[] = [
     aspect: 2.4,
     smoothing: 0.3,
     mouse: mouse({
-      base: 0.75, speedInfluence: 0.2, speedRef: 2,
+      base: 0.92, speedInfluence: 0.1, speedRef: 6,
       ramp: 0.8, rampFrom: 0.5, taper: 1, taperTo: 0.5,
     }),
   },
@@ -83,7 +87,7 @@ export const BRUSHES: readonly BrushSpec[] = [
         id: "pencil",
         name: "Sharp pencil",
         mouse: mouse({
-          base: 0.62, speedInfluence: 0.25, speedRef: 2,
+          base: 0.8, speedInfluence: 0.15, speedRef: 6,
           ramp: 0.6, rampFrom: 0.5, taper: 1, taperTo: 0.5,
         }),
       },
@@ -91,7 +95,7 @@ export const BRUSHES: readonly BrushSpec[] = [
         id: "ink",
         name: "Ink brush",
         mouse: mouse({
-          base: 0.7, speedInfluence: 0.6, speedRef: 1.8,
+          base: 0.9, speedInfluence: 0.3, speedRef: 6,
           ramp: 1.5, rampFrom: 0.12, taper: 2.5, taperTo: 0.05,
         }),
       },
@@ -111,7 +115,7 @@ export const BRUSHES: readonly BrushSpec[] = [
     intensityLabel: "Pigment",
     smoothing: 0.3,
     mouse: mouse({
-      base: 0.66, speedInfluence: 0.3, speedRef: 2,
+      base: 0.85, speedInfluence: 0.1, speedRef: 6,
       ramp: 0.5, rampFrom: 0.65, taper: 0,
     }),
   },
@@ -128,7 +132,7 @@ export const BRUSHES: readonly BrushSpec[] = [
     intensityLabel: "Density",
     smoothing: 0.25,
     mouse: mouse({
-      base: 0.62, speedInfluence: 0.45, speedRef: 2,
+      base: 0.88, speedInfluence: 0.15, speedRef: 6,
       ramp: 0.8, rampFrom: 0.4, taper: 1, taperTo: 0.4,
     }),
     materials: [
