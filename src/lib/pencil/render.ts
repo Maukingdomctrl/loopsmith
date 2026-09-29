@@ -203,37 +203,57 @@ const crScalar = (p0: number, p1: number, p2: number, p3: number, t: number) =>
     (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
     (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
 
-/** Ink smoothing width, in multiples of the stroke's full radius. */
+/** Ink smoothing, in multiples of the stroke's full radius: the centre line
+ *  lightly (keeps corners), pressure strongly (a pen's pressure readings are
+ *  noisy, and the width curve would turn that noise into a lumpy edge). */
 const INK_SMOOTH = 1.5;
+const INK_PRESSURE_SMOOTH = 6;
+/** Least pressure smoothing, in layer px, so fine lines get it too. */
+const INK_PRESSURE_SMOOTH_MIN = 8;
 
 /**
- * Arc-length Gaussian smoothing of an ink stroke's centre line and pressure,
- * in place. Removes hand and sensor jitter without lag (the window is
- * symmetric) and without pulling the ends in (the window shrinks to the
- * distance from each end, so the first and last samples stay put).
+ * Arc-length Gaussian smoothing of `values` along a stroke, in place. The
+ * window is symmetric (no lag) and shrinks to the distance from each end, so
+ * the first and last samples stay put.
  */
-function smoothInk(X: Float64Array, Y: Float64Array, P: Float64Array, n: number, sigma: number) {
+function smoothAlong(s: Float64Array, n: number, sigma: number, values: Float64Array[]) {
   if (!(sigma > 0.25)) return;
-  const s = new Float64Array(n);
-  for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(X[i] - X[i - 1], Y[i] - Y[i - 1]);
   const L = s[n - 1];
-  const sx = new Float64Array(n), sy = new Float64Array(n), sp = new Float64Array(n);
+  const out = values.map(() => new Float64Array(n));
+  const acc = new Float64Array(values.length);
   for (let i = 0; i < n; i++) {
     const sg = Math.min(sigma, s[i], L - s[i]);
-    if (sg < 1e-3) { sx[i] = X[i]; sy[i] = Y[i]; sp[i] = P[i]; continue; }
+    if (sg < 1e-3) {
+      values.forEach((v, k) => (out[k][i] = v[i]));
+      continue;
+    }
     const reach = 2.5 * sg, inv = 1 / (2 * sg * sg);
-    let wx = 0, wy = 0, wp = 0, wt = 0;
+    acc.fill(0);
+    let wt = 0;
     for (let j = i; j >= 0 && s[i] - s[j] <= reach; j--) {
       const d = s[i] - s[j], w = Math.exp(-d * d * inv);
-      wx += X[j] * w; wy += Y[j] * w; wp += P[j] * w; wt += w;
+      for (let k = 0; k < values.length; k++) acc[k] += values[k][j] * w;
+      wt += w;
     }
     for (let j = i + 1; j < n && s[j] - s[i] <= reach; j++) {
       const d = s[j] - s[i], w = Math.exp(-d * d * inv);
-      wx += X[j] * w; wy += Y[j] * w; wp += P[j] * w; wt += w;
+      for (let k = 0; k < values.length; k++) acc[k] += values[k][j] * w;
+      wt += w;
     }
-    sx[i] = wx / wt; sy[i] = wy / wt; sp[i] = wp / wt;
+    for (let k = 0; k < values.length; k++) out[k][i] = acc[k] / wt;
   }
-  X.set(sx); Y.set(sy); P.set(sp);
+  values.forEach((v, k) => v.set(out[k]));
+}
+
+/** Smooth an ink stroke's centre line and pressure (output-space samples). */
+function smoothInk(
+  X: Float64Array, Y: Float64Array, P: Float64Array, n: number,
+  sigmaLine: number, sigmaPressure: number
+) {
+  const s = new Float64Array(n);
+  for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(X[i] - X[i - 1], Y[i] - Y[i - 1]);
+  smoothAlong(s, n, sigmaPressure, [P]);
+  smoothAlong(s, n, sigmaLine, [X, Y]);
 }
 
 function buildRibbon(stroke: PencilStroke, m: Mat2D): Ribbon {
@@ -270,7 +290,13 @@ function buildRibbon(stroke: PencilStroke, m: Mat2D): Ribbon {
     UY[i] = dy / len;
   }
 
-  if (ink && n > 2) smoothInk(X, Y, P, n, INK_SMOOTH * stroke.size * scale);
+  if (ink && n > 2) {
+    smoothInk(
+      X, Y, P, n,
+      INK_SMOOTH * stroke.size * scale,
+      Math.max(INK_PRESSURE_SMOOTH * stroke.size, INK_PRESSURE_SMOOTH_MIN) * scale
+    );
+  }
 
   const out: Ribbon = {
     n: 0,
