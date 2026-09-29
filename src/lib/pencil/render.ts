@@ -203,6 +203,39 @@ const crScalar = (p0: number, p1: number, p2: number, p3: number, t: number) =>
     (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
     (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
 
+/** Ink smoothing width, in multiples of the stroke's full radius. */
+const INK_SMOOTH = 1.5;
+
+/**
+ * Arc-length Gaussian smoothing of an ink stroke's centre line and pressure,
+ * in place. Removes hand and sensor jitter without lag (the window is
+ * symmetric) and without pulling the ends in (the window shrinks to the
+ * distance from each end, so the first and last samples stay put).
+ */
+function smoothInk(X: Float64Array, Y: Float64Array, P: Float64Array, n: number, sigma: number) {
+  if (!(sigma > 0.25)) return;
+  const s = new Float64Array(n);
+  for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(X[i] - X[i - 1], Y[i] - Y[i - 1]);
+  const L = s[n - 1];
+  const sx = new Float64Array(n), sy = new Float64Array(n), sp = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const sg = Math.min(sigma, s[i], L - s[i]);
+    if (sg < 1e-3) { sx[i] = X[i]; sy[i] = Y[i]; sp[i] = P[i]; continue; }
+    const reach = 2.5 * sg, inv = 1 / (2 * sg * sg);
+    let wx = 0, wy = 0, wp = 0, wt = 0;
+    for (let j = i; j >= 0 && s[i] - s[j] <= reach; j--) {
+      const d = s[i] - s[j], w = Math.exp(-d * d * inv);
+      wx += X[j] * w; wy += Y[j] * w; wp += P[j] * w; wt += w;
+    }
+    for (let j = i + 1; j < n && s[j] - s[i] <= reach; j++) {
+      const d = s[j] - s[i], w = Math.exp(-d * d * inv);
+      wx += X[j] * w; wy += Y[j] * w; wp += P[j] * w; wt += w;
+    }
+    sx[i] = wx / wt; sy[i] = wy / wt; sp[i] = wp / wt;
+  }
+  X.set(sx); Y.set(sy); P.set(sp);
+}
+
 function buildRibbon(stroke: PencilStroke, m: Mat2D): Ribbon {
   const pts = stroke.pts;
   const n = strokeSamples(stroke);
@@ -236,6 +269,8 @@ function buildRibbon(stroke: PencilStroke, m: Mat2D): Ribbon {
     UX[i] = dx / len;
     UY[i] = dy / len;
   }
+
+  if (ink && n > 2) smoothInk(X, Y, P, n, INK_SMOOTH * stroke.size * scale);
 
   const out: Ribbon = {
     n: 0,
