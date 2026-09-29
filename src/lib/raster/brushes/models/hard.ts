@@ -41,21 +41,21 @@ const MATERIALS: Record<string, HardMaterial> = {
   // even and clean: width follows pressure closely and linearly, from a hairline
   // at a whisper to full width; a light touch is also a lighter line
   pen: {
-    width: { from: 0.07, to: 1, gamma: 0.9 },
-    opacity: { from: 0.15, to: 1, gamma: 0.75 },
+    width: { from: 0.02, to: 1, gamma: 1.25 },
+    opacity: { from: 0.06, to: 1, gamma: 1.1 },
     grain: 0,
   },
   // sharp graphite: pressure changes width AND how much lead is laid down
   pencil: {
-    width: { from: 0.2, to: 1, gamma: 1.1 },
-    opacity: { from: 0.5, to: 1, gamma: 0.85 },
+    width: { from: 0.12, to: 1, gamma: 1.2 },
+    opacity: { from: 0.2, to: 1, gamma: 1.1 },
     grain: 0.55,
   },
   // brush pen: a hairline at a whisper, little until pressed, then a heavy swell;
   // light strokes come out soft grey, pressed ones solid
   ink: {
-    width: { from: 0.035, to: 1, gamma: 1.6, ease: 0.3 },
-    opacity: { from: 0.15, to: 1, gamma: 0.8 },
+    width: { from: 0.015, to: 1, gamma: 1.9, ease: 0.2 },
+    opacity: { from: 0.08, to: 1, gamma: 1 },
     grain: 0,
   },
 };

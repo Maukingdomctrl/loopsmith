@@ -62,12 +62,12 @@ import { paperField, type PaperField } from "../paper";
 /* ---------- tuning ---------- */
 
 /** Pressure → water laid down (a whisper of pressure still wets the paper). */
-const WATER: PressureCurve = { from: 0.14, to: 1, gamma: 1.05 };
+const WATER: PressureCurve = { from: 0.08, to: 1, gamma: 1.1 };
 /** Pressure → pigment laid down (much more selective: light = pale wash). */
-const PIGMENT: PressureCurve = { from: 0.05, to: 1, gamma: 1.5 };
+const PIGMENT: PressureCurve = { from: 0.02, to: 1, gamma: 1.6 };
 /** Pressure → footprint radius (fraction of size): a light touch is a thin line,
  *  pressing spreads the brush wide, like pushing a real brush onto the paper. */
-const SPREAD_RADIUS: PressureCurve = { from: 0.18, to: 1, gamma: 1.1 };
+const SPREAD_RADIUS: PressureCurve = { from: 0.06, to: 1, gamma: 1.35 };
 
 /**
  * The physics constants. One object so the whole behaviour of the brush is

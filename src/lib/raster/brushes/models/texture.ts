@@ -107,7 +107,7 @@ const SURFACES: Record<string, Surface> = {
 /** Pressure → depth of contact. */
 const REACH: PressureCurve = { from: 0, to: 1, gamma: 1.1, ease: 0.1 };
 /** Pressure → how much material transfers where there is contact. */
-const AMOUNT: PressureCurve = { from: 0.5, to: 1, gamma: 0.8 };
+const AMOUNT: PressureCurve = { from: 0.15, to: 1, gamma: 1 };
 /** The bristles belong to the brush, not to any one stroke: every stroke drags
  *  the same set, so this seed is a constant rather than per-stroke. */
 const BRISTLE_SEED = 7;
@@ -143,7 +143,8 @@ export class TextureModel implements BrushModel {
 
   private footprintFor(inp: BrushInput): Footprint {
     const s = this.surf;
-    const r = inp.size * mix(s.radiusLow, 1, inp.pressure);
+    // a light touch narrows the mark to a third of its low-pressure width
+    const r = inp.size * pressureCurve(inp.pressure, { from: s.radiusLow * 0.35, to: 1, gamma: 1.1 });
     const rx = r * (1 + TILT_STRETCH * inp.tilt);
     const ry = r * (1 - 0.15 * inp.tilt);
     return roundFootprint(inp.x, inp.y, rx, ry, inp.azimuth, s.plateau);
