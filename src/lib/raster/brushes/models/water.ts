@@ -65,8 +65,9 @@ import { paperField, type PaperField } from "../paper";
 const WATER: PressureCurve = { from: 0.14, to: 1, gamma: 1.05 };
 /** Pressure → pigment laid down (much more selective: light = pale wash). */
 const PIGMENT: PressureCurve = { from: 0.05, to: 1, gamma: 1.5 };
-/** Pressure → footprint radius (fraction of size): pressing widens the mark. */
-const SPREAD_RADIUS: PressureCurve = { from: 0.62, to: 1, gamma: 0.9 };
+/** Pressure → footprint radius (fraction of size): a light touch is a thin line,
+ *  pressing spreads the brush wide, like pushing a real brush onto the paper. */
+const SPREAD_RADIUS: PressureCurve = { from: 0.18, to: 1, gamma: 1.1 };
 
 /**
  * The physics constants. One object so the whole behaviour of the brush is
