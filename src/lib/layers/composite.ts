@@ -27,6 +27,7 @@ import { layerContentBox, layerMatrix } from "./layerSpace";
 import type { Mat2D } from "@/types/geometry";
 import type { PencilStroke } from "@/lib/pencil/types";
 import { renderStrokes, strokesBounds } from "@/lib/pencil/render";
+import { applyAdjustment, isIdentityAdjustment } from "./adjust";
 
 export type Surface2D =
   | CanvasRenderingContext2D
@@ -160,6 +161,19 @@ export function compositeLayers(
   ctx.globalAlpha = options.globalAlpha ?? 1;
   const allow = options.onlyLayerIds ? new Set(options.onlyLayerIds) : null;
 
+  // Clipping masks and adjustment layers need the stack built on its own
+  // surface. Frames without them keep the direct path below, byte for byte.
+  if (layers.some((l) => l.clip || l.adjust)) {
+    const stack = compositeStack(layers, resolve, options, docScale, smoothing, allow);
+    if (stack) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(stack as CanvasImageSource, 0, 0);
+    }
+    ctx.restore();
+    return;
+  }
+
   // Bottom-to-top. The exact mirror of pickTopmost's descent.
   for (const layer of layers) {
     if (!isLayerRenderable(layer)) continue;
@@ -173,6 +187,112 @@ export function compositeLayers(
   }
 
   ctx.restore();
+}
+
+/* ---------------- clipping masks & adjustment layers ---------------- */
+
+/**
+ * The layer stack on its own surface, bottom to top.
+ *
+ * The opaque background (document state) is the bottom of the stack here, so
+ * blend modes and adjustments see it exactly as they would in Photoshop; the
+ * checkerboard stays outside, on the caller's surface.
+ *
+ * A layer followed by clipped layers forms a clipping group: the group is
+ * built on its own surface (the base layer, then each clipped layer masked to
+ * the base's pixels) and composited with the base's opacity and blend.
+ */
+function compositeStack(
+  layers: readonly Layer[],
+  resolve: BitmapResolver,
+  options: CompositeOptions,
+  docScale: number,
+  smoothing: boolean,
+  allow: Set<string> | null
+): HTMLCanvasElement | OffscreenCanvas | null {
+  const size = options.surface;
+  const stack = createSurface(size);
+  if (!stack) return null;
+  if (!options.background.transparent) {
+    stack.ctx.fillStyle = options.background.color;
+    stack.ctx.fillRect(0, 0, size, size);
+  }
+  const opts: CompositeOptions = { ...options, globalAlpha: 1 };
+  const shown = (l: Layer) => l.visible && (!allow || allow.has(l.id));
+
+  let i = 0;
+  while (i < layers.length) {
+    const layer = layers[i];
+
+    // An adjustment has no pixels to clip to: layers clipped to it simply
+    // draw normally, so only the adjustment itself is consumed here.
+    if (layer.adjust) {
+      if (shown(layer)) applyAdjustTo(stack.ctx, size, layer);
+      i++;
+      continue;
+    }
+
+    let j = i + 1;
+    while (j < layers.length && layers[j].clip) j++;
+    const clipped = layers.slice(i + 1, j);
+    i = j;
+
+    // A hidden or empty base hides its whole clipping group.
+    if (!shown(layer) || !isLayerRenderable(layer)) continue;
+    const bitmap = resolve(layer);
+    if (layer.image && !bitmap) continue;
+
+    if (!clipped.length) {
+      drawLayer(stack.ctx, layer, bitmap, docScale, smoothing, opts);
+      continue;
+    }
+
+    const group = createSurface(size);
+    const mask = createSurface(size);
+    if (!group || !mask) continue;
+    drawLayer(mask.ctx, { ...layer, opacity: 1, blend: "normal" }, bitmap, docScale, smoothing, opts);
+    group.ctx.drawImage(mask.canvas as CanvasImageSource, 0, 0);
+
+    for (const c of clipped) {
+      if (!shown(c)) continue;
+      if (c.adjust) {
+        applyAdjustTo(group.ctx, size, c);
+        continue;
+      }
+      if (!isLayerRenderable(c)) continue;
+      const cb = resolve(c);
+      if (c.image && !cb) continue;
+      const own = createSurface(size);
+      if (!own) continue;
+      drawLayer(own.ctx, { ...c, blend: "normal" }, cb, docScale, smoothing, opts);
+      own.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      own.ctx.globalCompositeOperation = "destination-in";
+      own.ctx.drawImage(mask.canvas as CanvasImageSource, 0, 0);
+      group.ctx.save();
+      group.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      // Normal paint keeps the base's alpha exactly (source-atop).
+      group.ctx.globalCompositeOperation =
+        c.blend === "normal" ? "source-atop" : BLEND_TO_COMPOSITE[c.blend] ?? "source-over";
+      group.ctx.drawImage(own.canvas as CanvasImageSource, 0, 0);
+      group.ctx.restore();
+    }
+
+    stack.ctx.save();
+    stack.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    stack.ctx.globalAlpha = layer.opacity;
+    stack.ctx.globalCompositeOperation = BLEND_TO_COMPOSITE[layer.blend] ?? "source-over";
+    stack.ctx.drawImage(group.canvas as CanvasImageSource, 0, 0);
+    stack.ctx.restore();
+  }
+  return stack.canvas;
+}
+
+/** Run an adjustment layer over everything on `ctx` so far. */
+function applyAdjustTo(ctx: Surface2D, size: number, layer: Layer): void {
+  if (!layer.adjust || layer.opacity <= 0 || isIdentityAdjustment(layer.adjust)) return;
+  const img = ctx.getImageData(0, 0, size, size);
+  applyAdjustment(img.data, layer.adjust, layer.opacity);
+  ctx.putImageData(img, 0, 0);
 }
 
 function drawLayer(

@@ -38,6 +38,8 @@ export function layerStateKey(layers: readonly Layer[]): string {
       l.visible ? "1" : "0",
       roundTo(l.opacity, 4).toString(),
       l.blend,
+      l.clip ? "c" : "-",
+      l.adjust ? JSON.stringify(l.adjust) : "-",
       `${l.size.w}x${l.size.h}`,
       l.crop ? `${l.crop.x},${l.crop.y},${l.crop.w},${l.crop.h}` : "-",
       roundTo(l.pose.position.x, 4).toString(),

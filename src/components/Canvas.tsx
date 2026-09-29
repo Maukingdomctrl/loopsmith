@@ -293,7 +293,8 @@ const commit = useCallback((next: Frame) => {
    * single-layer project the two are the same, so the controls behave exactly
    * as they did before layers existed.
    */
-  const targetLayer: Layer | null = editor.primary ?? base;
+  const targetLayer: Layer | null =
+    editor.primary && !editor.primary.adjust ? editor.primary : base; // adjustments have no size
 
   /** Selection consisting solely of the base layer — the legacy drag target. */
   const baseSelection = useMemo<LayerSelection>(
@@ -387,7 +388,8 @@ const commit = useCallback((next: Frame) => {
   // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
-    if (!paintLayer) return;
+    // Adjustment layers have no pixels to paint.
+    if (!paintLayer || paintLayer.adjust) return;
 
     if (!paintLayer.image && !paintLayer.strokes?.length) {
       if (paintLayer.size.w !== BLANK_SIZE || paintLayer.size.h !== BLANK_SIZE) {
@@ -692,7 +694,7 @@ const commit = useCallback((next: Frame) => {
     }
 
     const local = toLocal(p.x, p.y);
-    if (!local || !paintLayer || paintLayer.locked) return true;
+    if (!local || !paintLayer || paintLayer.locked || paintLayer.adjust) return true;
 
     if (activeTool === "fill") {
       if (!surfaceReady()) return true;
