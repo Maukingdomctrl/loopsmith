@@ -18,7 +18,7 @@ export async function exportGIF(
   background: CanvasBackground = DEFAULT_BACKGROUND
 ): Promise<Blob> {
   const hasArt = frames.some(
-  (f) => f.image || f.layers?.some((l) => l.image && l.visible)
+  (f) => f.image || f.layers?.some((l) => (l.image || l.strokes?.length) && l.visible)
 );
 
 if (!hasArt) {
@@ -82,7 +82,7 @@ async function renderGIF(
 
   for (const frame of frames) {
   const renderable =
-    frame.layers?.filter((l) => l.image && l.visible) ?? [];
+    frame.layers?.filter((l) => (l.image || l.strokes?.length) && l.visible) ?? [];
 
   if (!renderable.length && !frame.image) continue;
 

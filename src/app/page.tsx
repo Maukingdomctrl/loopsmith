@@ -893,7 +893,7 @@ const frames = activeProject?.frames.length
 
         const targetId = frame.activeLayerId;
         const layers = frame.layers.map((l) =>
-          l.id === targetId ? { ...l, image: null, crop: null } : l
+          l.id === targetId ? { ...l, image: null, crop: null, strokes: [] } : l
         );
 
         return syncBaseFromLegacy({
@@ -1197,6 +1197,7 @@ const deleteProject = useCallback(
 
       <Timeline
         frames={timelineFrames}
+        background={background}
         activeFrame={activeFrame}
         onFrameSelect={selectFrame}
         onReorder={(from, to) => {

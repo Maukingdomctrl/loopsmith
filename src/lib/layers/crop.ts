@@ -297,7 +297,7 @@ export const cancelDocumentCrop = (): DocumentCrop | null => null;
 /** Tight canvas-space bounds of everything renderable — "crop to artwork". */
 export function contentBoundsCanvas(layers: readonly Layer[]): Rect {
   const rects = layers
-    .filter((l) => l.visible && l.image)
+    .filter((l) => l.visible && (l.image || l.strokes?.length))
     .map(layerBoundsCanvas);
   return rects.length ? rectIntersect(rectUnionAll(rects), CANVAS_RECT) : RECT_EMPTY;
 }
