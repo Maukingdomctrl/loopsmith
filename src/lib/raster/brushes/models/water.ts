@@ -76,7 +76,7 @@ export const WATER_TUNING = {
   /** Film depth at the centre of one full-pressure pass. */
   waterMax: 1,
   /** Pigment density at the centre of one full pass (all settled in place). */
-  pigmentMax: 2.6,
+  pigmentMax: 3,
 
   /** Brush loading along the stroke, in brush radii of travel. */
   loadStart: 1.5,       // first mark: a loaded brush
@@ -94,7 +94,7 @@ export const WATER_TUNING = {
   /** Pigment drift toward thinner water, per step, on the RELATIVE depth
    *  difference across a face — so it stays strong right at the wet front,
    *  where the absolute difference is small but the relative one is total. */
-  eta: 0.9,
+  eta: 0.55, // stronger pulled nearly all pigment to the rim: a pale body in a hard outline
   driftSoft: 0.02,
   /** Drift into tooth valleys is stronger than onto peaks (0 = indifferent). */
   driftValley: 0.3,
