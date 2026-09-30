@@ -1359,7 +1359,7 @@ const frames = activeProject?.frames.length
 
   /** Animate's timeline keys. Read through a ref so the listener is added once. */
   const timelineKeys = useRef<(e: KeyboardEvent) => void>(() => {});
-  timelineKeys.current = (e) => {
+  const onTimelineKey = (e: KeyboardEvent) => {
     const el = e.target as HTMLElement | null;
     const typing =
       !!el &&
@@ -1406,6 +1406,10 @@ const frames = activeProject?.frames.length
     }
     e.preventDefault();
   };
+
+  useEffect(() => {
+    timelineKeys.current = onTimelineKey;
+  });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => timelineKeys.current(e);

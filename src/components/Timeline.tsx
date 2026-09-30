@@ -158,17 +158,12 @@ export default function Timeline({
     if (next !== onion[side]) onOnionChange({ ...onion, [side]: next });
   };
 
-  const onionHandle = (side: "before" | "after") => ({
-    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return;
-      e.stopPropagation(); // not a scrub
-      e.currentTarget.setPointerCapture(e.pointerId);
-      onionDrag.current = side;
-    },
-    onPointerMove: moveOnion,
-    onPointerUp: () => (onionDrag.current = null),
-    onPointerCancel: () => (onionDrag.current = null),
-  });
+  const startOnion = (e: React.PointerEvent<HTMLDivElement>, side: "before" | "after") => {
+    if (e.button !== 0) return;
+    e.stopPropagation(); // not a scrub
+    e.currentTarget.setPointerCapture(e.pointerId);
+    onionDrag.current = side;
+  };
 
   /* ---------- dragging a span's right edge ---------- */
 
@@ -326,13 +321,19 @@ export default function Timeline({
                   style={{ left: onionLeft, width: onionRight - onionLeft }}
                 />
                 <div
-                  {...onionHandle("before")}
+                  onPointerDown={(e) => startOnion(e, "before")}
+                  onPointerMove={moveOnion}
+                  onPointerUp={() => (onionDrag.current = null)}
+                  onPointerCancel={() => (onionDrag.current = null)}
                   title={`Onion skin: ${onion.before} before (drag)`}
                   className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-l-sm border-y-2 border-l-2 border-red-400"
                   style={{ left: onionLeft - 6 }}
                 />
                 <div
-                  {...onionHandle("after")}
+                  onPointerDown={(e) => startOnion(e, "after")}
+                  onPointerMove={moveOnion}
+                  onPointerUp={() => (onionDrag.current = null)}
+                  onPointerCancel={() => (onionDrag.current = null)}
                   title={`Onion skin: ${onion.after} after (drag)`}
                   className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-r-sm border-y-2 border-r-2 border-green-400"
                   style={{ left: onionRight }}
