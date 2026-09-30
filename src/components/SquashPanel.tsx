@@ -23,6 +23,9 @@ interface Props {
   dispatch: (a: LayerAction) => void;
   /** The slider drag ended: the next change is a new undo step. */
   onEnd: () => void;
+  frameCount?: number;
+  /** Apply a bounce cycle across all frames, this frame landing. */
+  onBounce?: (layer: Layer | null, strength: number, anchor: SquashAnchor) => void;
 }
 
 const ANCHORS: { id: SquashAnchor; label: string }[] = [
@@ -31,8 +34,11 @@ const ANCHORS: { id: SquashAnchor; label: string }[] = [
   { id: "top", label: "Top" },
 ];
 
-export default function SquashPanel({ layer, disabled, dispatch, onEnd }: Props) {
+export default function SquashPanel({
+  layer, disabled, dispatch, onEnd, frameCount = 1, onBounce,
+}: Props) {
   const [anchor, setAnchor] = useState<SquashAnchor>("bottom");
+  const [bounce, setBounce] = useState(25);
   const locked = !layer || layer.locked || !!disabled;
   const amount = layer ? stretchToAmount(stretchOf(layer.pose)) : 0;
 
@@ -92,6 +98,32 @@ export default function SquashPanel({ layer, disabled, dispatch, onEnd }: Props)
       >
         Reset squash
       </button>
+
+      {onBounce && (
+        <div className="space-y-1 border-t border-white/10 pt-2">
+          <label className="block text-[10px] text-zinc-400">
+            <span className="flex justify-between">
+              <span>Bounce strength</span>
+              <span className="text-zinc-300">{bounce}%</span>
+            </span>
+            <input
+              type="range" min={5} max={60} step={1}
+              value={bounce}
+              disabled={locked}
+              onChange={(e) => setBounce(Number(e.target.value))}
+              className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
+            />
+          </label>
+          <button
+            onClick={() => onBounce(layer, bounce, anchor)}
+            disabled={locked || frameCount < 2}
+            title="This frame lands (squashed); the others follow a bounce: stretched going up, as drawn at the top, stretched coming down"
+            className="w-full rounded bg-zinc-800 py-1 text-[10px] text-zinc-300 hover:bg-zinc-700 disabled:opacity-40"
+          >
+            Bounce across all frames
+          </button>
+        </div>
+      )}
     </div>
   );
 }

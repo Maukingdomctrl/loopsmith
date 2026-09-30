@@ -58,6 +58,12 @@ import { BLANK_LAYER_SIZE } from "@/lib/layers/constants";
 import { applyMaskToPixels } from "@/lib/layers/maskOps";
 import { removeFrameBackground } from "@/lib/sprite/removeBackground";
 import {
+  amountToStretch,
+  bounceAmount,
+  squashAnchorPoint,
+  type SquashAnchor,
+} from "@/lib/layers/squash";
+import {
   createBlankFrame,
   duplicateFrame,
   deleteFrame,
@@ -70,7 +76,7 @@ import { defaultFitPose } from "@/lib/layers/layerSpace";
 import { clearTransforms } from "@/lib/frameTransform";
 /* ---------- layer system ---------- */
 
-import type { AdjustmentType, CanvasBackground } from "@/types/layer";
+import type { AdjustmentType, CanvasBackground, Layer } from "@/types/layer";
 import { ADJUSTMENT_LABELS, DEFAULT_BACKGROUND, defaultAdjustment } from "@/types/layer";
 import { useLayerEditor } from "@/hooks/useLayerEditor";
 import {
@@ -1126,6 +1132,35 @@ const frames = activeProject?.frames.length
     }
   };
 
+  /**
+   * One-click bounce: squash/stretch on every frame following a bounce cycle,
+   * with the current frame as the landing. Acts on the layer's linked copies
+   * when it has them, otherwise on each frame's base layer. One undo step.
+   */
+  const applyBounce = async (layer: Layer | null, strength: number, anchor: SquashAnchor) => {
+    const project = projectsRef.current.find((p) => p.id === activeProjectId);
+    if (!project || isPlaying || selectionActive) return;
+    // The anchor comes from each frame's drawn pixels: decode them first.
+    await preloadFrameBitmaps(project.frames.flatMap((f) => f.layers));
+    const n = project.frames.length;
+    const landing = editingIndex;
+    updateProject((p) => ({
+      ...p,
+      frames: p.frames.map((f, i) => {
+        const target = layer?.linkId
+          ? f.layers.find((l) => l.linkId === layer.linkId)
+          : f.layers.find((l) => l.kind === "base");
+        if (!target || target.locked) return f;
+        return layerReducer(f, {
+          type: "xf/squash",
+          id: target.id,
+          stretch: amountToStretch(bounceAmount(i, n, landing, strength)),
+          anchor: squashAnchorPoint(target, anchor),
+        });
+      }),
+    }));
+  };
+
   /** Ctrl+I: invert the targeted mask. */
   const invertMaskShortcut = useRef<() => boolean>(() => false);
   invertMaskShortcut.current = () => {
@@ -1415,6 +1450,8 @@ const deleteProject = useCallback(
               disabled={isPlaying || selectionActive}
               dispatch={editor.dispatch}
               onEnd={editor.endGesture}
+              frameCount={frames.length}
+              onBounce={applyBounce}
             />
           </details>
           <TransparencyToggle
