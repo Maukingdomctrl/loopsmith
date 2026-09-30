@@ -11,6 +11,11 @@
  * (`addSample`, `previewInto`, `end`, `cancel`), so the canvas integration is a
  * one-line swap.
  *
+ * BLEND MODES work like Photoshop's brush Mode: the stroke is built on its own,
+ * then blended onto the layer once with the full separable-blend formula (see
+ * `compositeInto`). A stroke therefore never multiplies or dodges over itself
+ * where it overlaps — only over what was on the layer before it.
+ *
  * PREVIEW IS INCREMENTAL. The composite of a pixel depends only on the
  * pre-stroke pixel and the material at that pixel, so a live preview only has
  * to redo the pixels that changed since the last frame. A long stroke with a
@@ -21,6 +26,7 @@ import type { Rect } from "@/types/geometry";
 import type { StrokePoint, StrokeSample } from "@/types/raster";
 import { DirtyTracker, RasterSurface } from "../surface";
 import { hash2 } from "./noise";
+import { compositeInto } from "../color";
 import { StrokePath } from "../stroke";
 import { RECT_EMPTY, rect, rectIsEmpty } from "@/lib/geometry/rect";
 import { clamp01, mix, smootherstep, smoothstep } from "./curves";
@@ -55,6 +61,8 @@ export class MaterialStroke {
   /** Everything this stroke has touched, integer pixels. */
   private readonly extent = new DirtyTracker();
   private lastTarget: RasterSurface | null = null;
+  /** The stroke alone, over transparent — only for non-normal modes. */
+  private scratch: RasterSurface | null = null;
 
   private ended = false;
   private startTime: number | null = null;
@@ -252,6 +260,40 @@ export class MaterialStroke {
   }
 
   /**
+   * Lay the stroke over `target`, which holds the pre-stroke pixels in `r`.
+   * Normal mode lets the material composite directly (water glazes over the
+   * paint beneath). Any other mode renders the stroke alone first, then blends
+   * that colour and alpha onto the layer, in float, per pixel.
+   */
+  private compositeRegion(target: RasterSurface, r: Rect): void {
+    const model = this.model;
+    if (!model) return;
+    const mode = this.options.blend ?? "normal";
+    if (mode === "normal") {
+      model.composite(target, r);
+      return;
+    }
+    const scratch = (this.scratch ??= new RasterSurface(this.surface.width, this.surface.height));
+    const s = scratch.data;
+    const out = target.data;
+    const w = this.surface.width * 4;
+    for (let y = r.y; y < r.y + r.h; y++) {
+      const a = y * w + r.x * 4;
+      s.fill(0, a, a + r.w * 4);
+    }
+    model.composite(scratch, r);
+    for (let y = r.y; y < r.y + r.h; y++) {
+      let i = y * w + r.x * 4;
+      for (let x = 0; x < r.w; x++, i += 4) {
+        const sa = s[i + 3];
+        if (sa <= 0) continue;
+        const k = 1 / sa;
+        compositeInto(out, i, s[i] * k, s[i + 1] * k, s[i + 2] * k, sa > 1 ? 1 : sa, mode);
+      }
+    }
+  }
+
+  /**
    * Show the stroke so far. Only pixels the model changed since the previous
    * preview are recomposited (from the pre-stroke pixels, so nothing ever
    * darkens past the true result).
@@ -269,7 +311,7 @@ export class MaterialStroke {
     if (!region) return;
 
     this.restoreBaseline(target, region);
-    this.model?.composite(target, region);
+    this.compositeRegion(target, region);
     if (this.options.lockAlpha) target.keepAlpha(this.baseline, region);
     target.dirty.addRect(region);
   }
@@ -297,7 +339,7 @@ export class MaterialStroke {
     if (rectIsEmpty(region)) return null;
 
     this.restoreBaseline(this.surface, region);
-    this.model?.composite(this.surface, region);
+    this.compositeRegion(this.surface, region);
     if (this.options.lockAlpha) this.surface.keepAlpha(this.baseline, region);
     this.surface.dirty.addRect(region);
     return region;

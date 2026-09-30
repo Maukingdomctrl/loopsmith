@@ -74,7 +74,7 @@ export const BRUSHES: readonly BrushSpec[] = [
     maxSize: 24,
     defaultIntensity: 1,
     intensityLabel: "Opacity",
-    smoothing: 0.12,
+    smoothing: 0.3,
     // a mouse has no pressure, so the pen draws its full width, evenly
     mouse: mouse({ base: 1 }),
     materials: [
@@ -152,7 +152,7 @@ export function brushSpec(id: BrushId): BrushSpec {
   return BRUSHES.find((b) => b.id === id) ?? BRUSHES[0];
 }
 
-/** Every brush remembers its own size, intensity, material and angle. */
+/** Every brush remembers its own size, intensity, material, angle and mode. */
 export function defaultBrushPrefs(): Record<BrushId, BrushPrefs> {
   const out = {} as Record<BrushId, BrushPrefs>;
   for (const b of BRUSHES) {
@@ -161,6 +161,7 @@ export function defaultBrushPrefs(): Record<BrushId, BrushPrefs> {
       intensity: b.defaultIntensity,
       material: b.defaultMaterial,
       angle: 0,
+      mode: "normal",
     };
   }
   return out;

@@ -15,6 +15,7 @@
 
 import type { Vec2, Rect } from "@/types/geometry";
 import type { RGBA } from "@/types/raster";
+import type { BlendMode } from "@/types/layer";
 import type { RasterSurface } from "../surface";
 import type { DirtyTracker } from "../surface";
 
@@ -180,7 +181,12 @@ export interface BrushPrefs {
   readonly intensity: number;
   readonly material?: string;
   readonly angle: number;
+  /** How the finished stroke blends onto the layer. Missing = normal. */
+  readonly mode?: BlendMode;
 }
+
+/** The blend modes a brush offers, in the panel's order. */
+export const BRUSH_MODES: readonly BlendMode[] = ["normal", "multiply", "overlay", "color-dodge"];
 
 /** What the stroke needs to start. */
 export interface MaterialStrokeOptions {
@@ -200,6 +206,8 @@ export interface MaterialStrokeOptions {
   readonly seed?: number;
   /** Alpha lock: only recolour pixels the layer already has. */
   readonly lockAlpha?: boolean;
+  /** Blend mode of the stroke over the layer. Missing = normal. */
+  readonly blend?: BlendMode;
 }
 
 /** The mouse recipe in force: the selected material's, else the brush's. */
