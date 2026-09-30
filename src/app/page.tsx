@@ -10,6 +10,7 @@ import ProjectSidebar from "@/components/ProjectSidebar";
 
 import LayerPanel from "@/components/LayerPanel";
 import TransformPanel from "@/components/TransformPanel";
+import SquashPanel from "@/components/SquashPanel";
 import TransparencyToggle from "@/components/TransparencyToggle";
 import ExportDialog, {
   type ExportSize,
@@ -1401,6 +1402,21 @@ const deleteProject = useCallback(
             onCropTool={() => editor.beginCrop()}
           />
                     </details>
+          <details className="border-t border-white/10">
+            <summary className="cursor-pointer select-none list-none p-3 text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
+              ▸ SQUASH &amp; STRETCH
+            </summary>
+            <SquashPanel
+              layer={
+                editor.primary && !editor.primary.adjust
+                  ? editor.primary
+                  : editFrame.layers.find((l) => l.kind === "base") ?? null
+              }
+              disabled={isPlaying || selectionActive}
+              dispatch={editor.dispatch}
+              onEnd={editor.endGesture}
+            />
+          </details>
           <TransparencyToggle
             background={background}
             onChange={handleBackgroundChange}
