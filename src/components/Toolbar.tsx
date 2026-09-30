@@ -151,7 +151,7 @@ export default function Toolbar({
         <button
           onClick={onPlay}
           className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-zinc-900 hover:bg-zinc-200"
-          title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+          title={isPlaying ? "Pause (Enter)" : "Play (Enter)"}
           aria-label={isPlaying ? "Pause" : "Play"}
         >
           {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}

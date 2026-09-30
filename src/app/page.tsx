@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { FolderOpen } from "lucide-react";
 import Toolbar from "@/components/Toolbar";
 import Canvas, { type CanvasView } from "@/components/Canvas";
-import Timeline from "@/components/Timeline";
+import Timeline, { MAX_HOLD } from "@/components/Timeline";
 import RightSidebar from "@/components/RightSidebar";
 import ProjectSidebar from "@/components/ProjectSidebar";
 
@@ -67,8 +67,8 @@ import {
 import {
   createBlankFrame,
   duplicateFrame,
-  deleteFrame,
   reorderFrames,
+  moveFrames,
 } from "@/lib/frameOps";
 
 import SpriteSheetCutter from "@/components/SpriteSheetCutter";
@@ -128,7 +128,13 @@ export default function Home() {
   /** Paint tools target the selected layer's mask (its thumbnail is picked). */
   const [editMask, setEditMask] = useState(false);
   const [previewFrame, setPreviewFrame] = useState(0);
+  /** Timeline selection, by frame id. Empty = just the current frame. */
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [onionSkin, setOnionSkin] = useState(true);
+  /** How many frames the onion skin shows before / after the current one (view only). */
+  const [onionRange, setOnionRange] = useState({ before: 1, after: 1 });
+  /** Loop playback: the selected range (2+ frames) or everything. Off = play once and stop. */
+  const [loop, setLoop] = useState(true);
   const [showProjects, setShowProjects] = useState(false);
 
  
@@ -476,6 +482,17 @@ const frames = activeProject?.frames.length
   const background = activeProject?.background ?? DEFAULT_BACKGROUND;
 
   const timelineFrames = useMemo(() => frames.map((f) => f.image), [frames]);
+  const timelineDurations = useMemo(() => frames.map((f) => f.duration), [frames]);
+  const timelineIds = useMemo(() => frames.map((f) => f.id), [frames]);
+
+  /** The selected frame ids that still exist, in timeline order; falls back to the current frame. */
+  const selection = useMemo(() => {
+    const wanted = new Set(selectedIds);
+    const live = frames.filter((f) => wanted.has(f.id)).map((f) => f.id);
+    if (live.length) return live;
+    const current = frames[activeFrame];
+    return current ? [current.id] : [];
+  }, [selectedIds, frames, activeFrame]);
 
   const stabilizationPresent = useMemo(
     () => hasStabilization(frames),
@@ -495,11 +512,31 @@ const frames = activeProject?.frames.length
   // Frame shown on canvas
   const currentIndex = isPlaying ? previewFrame : activeFrame;
 
+  /** Onion-skin neighbours of the frame being edited. Hidden during playback, as in Animate. */
+  const onionFrames = useMemo(() => {
+    if (!onionSkin || isPlaying) return [];
+    const out: { frame: Frame; offset: number }[] = [];
+    for (let d = -onionRange.before; d <= onionRange.after; d++) {
+      const neighbour = d !== 0 ? frames[editingIndex + d] : undefined;
+      if (neighbour) out.push({ frame: neighbour, offset: d });
+    }
+    return out;
+  }, [onionSkin, isPlaying, onionRange, frames, editingIndex]);
+
   // ---------- Playback ----------
   const durationSignature = useMemo(
     () => frames.map((f) => `${f.duration}:${!!f.image}`).join("|"),
     [frames]
   );
+
+  // Frames playback may visit: the selected range when looping 2+ selected frames, else all.
+  let playFrom = 0;
+  let playTo = frames.length - 1;
+  if (loop && selection.length > 1) {
+    const picked = selection.map((id) => frames.findIndex((f) => f.id === id));
+    playFrom = Math.min(...picked);
+    playTo = Math.max(...picked);
+  }
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -507,7 +544,7 @@ const frames = activeProject?.frames.length
     const sequence: number[] = [];
 
     frames.forEach((frame, index) => {
-      if (!frame.image) return;
+      if (!frame.image || index < playFrom || index > playTo) return;
 
       const hold = Math.max(1, frame.duration || 1);
       for (let i = 0; i < hold; i++) sequence.push(index);
@@ -519,9 +556,11 @@ const frames = activeProject?.frames.length
     let lastTime = performance.now();
     let position = 0;
 
-    // Smooth resume: check if the previous frame is still valid in our new sequence
+    // Smooth resume: check if the previous frame is still valid in our new sequence.
+    // Playing once from the last frame starts again from the beginning.
     setPreviewFrame((prev) => {
       position = sequence.includes(prev) ? sequence.indexOf(prev) : 0;
+      if (!loop && prev === sequence[sequence.length - 1]) position = 0;
       return sequence[position];
     });
 
@@ -529,6 +568,13 @@ const frames = activeProject?.frames.length
 
     const animate = (time: number) => {
       if (time - lastTime >= frameDuration) {
+        if (!loop && position === sequence.length - 1) {
+          // Played once: stop on the last frame.
+          setIsPlaying(false);
+          setActiveFrame(sequence[position]);
+          setEditingIndex(sequence[position]);
+          return;
+        }
         position = (position + 1) % sequence.length;
         setPreviewFrame(sequence[position]);
         lastTime += frameDuration;
@@ -538,7 +584,7 @@ const frames = activeProject?.frames.length
 
     animationId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationId);
-  }, [isPlaying, fps, durationSignature]);
+  }, [isPlaying, fps, durationSignature, loop, playFrom, playTo]);
 
   // ---------- Helpers (Centralized Pauses) ----------
 
@@ -718,12 +764,25 @@ const frames = activeProject?.frames.length
 
       const next = typeof value === "function" ? value(activeFrame) : value;
 
+      setSelectedIds([]);
       setActiveFrame(next);
       setEditingIndex(next);
       setPreviewFrame(next);
     },
     [activeFrame]
   );
+
+  /** Play / stop. Stopping leaves the current frame where playback was, as in Animate. */
+  const togglePlay = useCallback(() => {
+    if (!isPlaying) {
+      setPreviewFrame(activeFrame); // play from the playhead
+      setIsPlaying(true);
+      return;
+    }
+    setIsPlaying(false);
+    setActiveFrame(previewFrame);
+    setEditingIndex(previewFrame);
+  }, [isPlaying, previewFrame, activeFrame]);
 
   const handleHistoryCommit = useCallback(() => {
     const project = projectsRef.current.find((p) => p.id === activeProjectId);
@@ -1232,8 +1291,133 @@ const frames = activeProject?.frames.length
     selectFrame(intent.frame);
   })();
 };
-  
-     const createProject = useCallback(() => {
+
+  /* ---------- timeline actions (buttons and Animate shortcuts) ---------- */
+
+  /** Put frames right after the current one and make the first current. One undo step. */
+  const insertAfterCurrent = (made: Frame[]) => {
+    const target = editingIndex + 1;
+    updateProject((project) => {
+      const next = [...project.frames];
+      next.splice(target, 0, ...made);
+      return { ...project, frames: next };
+    });
+    selectFrame(target);
+    setSelectedIds(made.map((f) => f.id));
+  };
+
+  /** Frames copied with Ctrl+C in the timeline. */
+  const frameClipboard = useRef<Frame[]>([]);
+
+  /** Delete the selected frames. One undo step. Never leaves the timeline empty:
+   *  a lone frame is reset to blank, and if every frame is selected the first stays. */
+  const deleteSelectedFrames = () => {
+    if (frames.length === 1) {
+      updateProject((project) => ({
+        ...project,
+        frames: [createBlankFrame()],
+        thumbnail: null,
+      }));
+      selectFrame(0);
+      return;
+    }
+
+    const doomed = new Set(selection);
+    if (doomed.size >= frames.length) doomed.delete(frames[0].id);
+    const first = frames.findIndex((f) => doomed.has(f.id));
+    if (first < 0) return;
+
+    frames.forEach((f) => {
+      if (!doomed.has(f.id) || !f.image || !activeProject) return;
+      deletedFrameImages.current.set(f.id, f.image);
+      deleteFrameImage(activeProject.id, f.id).catch(console.error);
+    });
+
+    updateProject((project) => {
+      const next = project.frames.filter((f) => !doomed.has(f.id));
+      return {
+        ...project,
+        frames: next,
+        thumbnail: next.find((f) => f.image)?.image ?? null,
+      };
+    });
+
+    selectFrame(Math.min(first, frames.length - doomed.size - 1));
+  };
+
+  /** Lengthen or shorten the current frame's hold by one tick. One undo step. */
+  const nudgeHold = (delta: number) => {
+    const frame = frames[editingIndex];
+    if (!frame) return;
+    const hold = Math.min(MAX_HOLD, Math.max(1, (frame.duration || 1) + delta));
+    if (hold === frame.duration) return;
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f, i) => (i === editingIndex ? { ...f, duration: hold } : f)),
+    }));
+  };
+
+  /** Animate's timeline keys. Read through a ref so the listener is added once. */
+  const timelineKeys = useRef<(e: KeyboardEvent) => void>(() => {});
+  const onTimelineKey = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null;
+    const typing =
+      !!el &&
+      (el.tagName === "TEXTAREA" ||
+        el.tagName === "SELECT" ||
+        el.isContentEditable ||
+        (el.tagName === "INPUT" &&
+          !["range", "color", "checkbox", "radio", "button"].includes((el as HTMLInputElement).type)));
+    if (typing || showExport || showCutter) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    switch (e.key) {
+      case ",":
+        selectFrame(Math.max(0, currentIndex - 1));
+        break;
+      case ".":
+        selectFrame(Math.min(frames.length - 1, currentIndex + 1));
+        break;
+      case "Enter":
+        if (e.repeat || selectionActive || editor.cropDraft) return;
+        if (el?.tagName === "BUTTON") {
+          // Play, rather than clicking the button that kept focus.
+          e.preventDefault();
+          togglePlay();
+          return;
+        }
+        // The canvas also uses Enter (closing a lasso): play only if nothing took it.
+        window.setTimeout(() => {
+          if (!e.defaultPrevented) togglePlay();
+        });
+        return;
+      case "F5":
+        nudgeHold(e.shiftKey ? -1 : 1);
+        break;
+      case "F6":
+        if (!frames[editingIndex]) return;
+        insertAfterCurrent([duplicateFrame(frames[editingIndex])]);
+        break;
+      case "F7":
+        insertAfterCurrent([createBlankFrame()]);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    timelineKeys.current = onTimelineKey;
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => timelineKeys.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const createProject = useCallback(() => {
   const project = createEmptyProject(
     `Animation ${projectsRef.current.length + 1}`
   );
@@ -1295,7 +1479,7 @@ const deleteProject = useCallback(
       <Toolbar
         isPlaying={isPlaying}
         saveStatus={saveStatus}
-        onPlay={() => setIsPlaying((v) => !v)}
+        onPlay={togglePlay}
         onUndo={undo}
         onRedo={redo}
         onImport={() =>
@@ -1363,10 +1547,7 @@ const deleteProject = useCallback(
           }
           editFrame={editFrame}
           onSaveStatusChange={setSaveStatus}
-          previousFrame={(() => {
-            const i = isPlaying ? previewFrame : editingIndex;
-            return i > 0 ? frames[i - 1] ?? null : null;
-          })()}
+          onionFrames={onionFrames}
           onionSkin={onionSkin}
           isPlaying={isPlaying}
           view={canvasView}
@@ -1478,25 +1659,41 @@ const deleteProject = useCallback(
 
       <Timeline
         frames={timelineFrames}
+        durations={timelineDurations}
+        frameIds={timelineIds}
+        selectedIds={selection}
+        onSelectionChange={setSelectedIds}
+        onion={onionSkin ? onionRange : undefined}
+        fps={fps}
+        loop={loop}
+        onLoopChange={setLoop}
+        onOnionChange={setOnionRange}
         background={background}
         activeFrame={activeFrame}
+        currentFrame={currentIndex}
         onFrameSelect={selectFrame}
+        onHoldChange={(index, hold, firstChange) => {
+          if (firstChange) handleHistoryCommit();
+          updateProjectQuiet((project) => ({
+            ...project,
+            frames: project.frames.map((f, i) => (i === index ? { ...f, duration: hold } : f)),
+          }));
+        }}
         onReorder={(from, to) => {
-          const insertAt = from < to ? to - 1 : to;
+          const dragged = frames[from];
+          if (!dragged) return;
+          // A selected frame drags the whole selection with it.
+          const ids = selection.includes(dragged.id) ? selection : [dragged.id];
+          const result = moveFrames(frames, ids, to);
+          if (result.frames.every((f, i) => f.id === frames[i].id)) return;
 
-          updateProject((project) => {
-            const next = [...project.frames];
+          updateProject((project) => ({
+            ...project,
+            frames: moveFrames(project.frames, ids, to).frames,
+          }));
 
-            const moved = next.splice(from, 1)[0];
-            next.splice(insertAt, 0, moved);
-
-            return {
-              ...project,
-              frames: next,
-            };
-          });
-
-          selectFrame(insertAt);
+          selectFrame(result.frames.findIndex((f) => f.id === dragged.id));
+          setSelectedIds(ids);
         }}
         onAddFrame={() => {
           const target = frames.length;
@@ -1513,59 +1710,15 @@ const deleteProject = useCallback(
           openPicker({ kind: "replace-active", frame });
         }}
                 onClear={clearActiveLayerPixels}
-        onDuplicate={() => {
-          const target = editingIndex + 1;
-
-          updateProject((project) => {
-            const next = [...project.frames];
-
-            next.splice(target, 0, duplicateFrame(next[editingIndex]));
-
-            return {
-              ...project,
-              frames: next,
-            };
-          });
-
-          selectFrame(target);
+        onDuplicate={() => insertAfterCurrent([duplicateFrame(frames[editingIndex])])}
+        onDeleteFrame={deleteSelectedFrames}
+        onCopy={() => {
+          frameClipboard.current = frames.filter((f) => selection.includes(f.id));
         }}
-        onDeleteFrame={() => {
-          if (frames.length === 1) {
-            updateProject((project) => ({
-              ...project,
-              frames: [createBlankFrame()],
-              thumbnail: null,
-            }));
-
-            selectFrame(0);
-            return;
+        onPaste={() => {
+          if (frameClipboard.current.length) {
+            insertAfterCurrent(frameClipboard.current.map(duplicateFrame));
           }
-
-          const frameToDelete = frames[editingIndex];
-
-          if (frameToDelete?.image && activeProject) {
-            deletedFrameImages.current.set(
-              frameToDelete.id,
-              frameToDelete.image
-            );
-
-            deleteFrameImage(activeProject.id, frameToDelete.id).catch(
-              console.error
-            );
-          }
-
-          updateProject((project) => {
-            const result = deleteFrame(project.frames, editingIndex);
-
-            return {
-              ...project,
-              frames: result.frames,
-              thumbnail: result.frames.find((f) => f.image)?.image ?? null,
-            };
-          });
-
-          const result = deleteFrame(frames, editingIndex);
-          selectFrame(result.nextIndex);
         }}
 
       />
