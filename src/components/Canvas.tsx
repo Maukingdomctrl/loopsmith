@@ -1248,23 +1248,10 @@ const commit = useCallback((next: Frame) => {
     checkerboard: true,
     interactive: true,
   });
-
-  // NEW — apply transparency mask
-  const mask = frame.transparency;
-  if (mask) {
-    const img = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-
-    for (let i = 0; i < mask.alpha.length; i++) {
-            img.data[i * 4 + 3] = Math.min(img.data[i * 4 + 3], mask.alpha[i]);
-    }
-
-    ctx.putImageData(img, 0, 0);
-  }
   }, [
       frame,
       frame.layers,
       frame.crop,
-      frame.transparency,
       frame.stab?.dx,
       frame.stab?.dy,
       background,

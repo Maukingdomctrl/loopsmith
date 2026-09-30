@@ -54,7 +54,11 @@ export function decodeFrame(
   images: ReadonlyMap<string, string | null>,
   projectId: string
 ): Frame {
-  const migrated = normalizeFrameLayers(migrateFrame(raw as never));
+  // Frames saved before the old per-frame transparency mask was removed may
+  // still carry it; drop it so it is not kept (or re-saved) invisibly.
+  const stored = { ...(raw as Record<string, unknown>) };
+  delete stored.transparency;
+  const migrated = normalizeFrameLayers(migrateFrame(stored as never));
 
   const layers: Layer[] = migrated.layers.map((l) => {
     const stored = images.get(layerImageKey(projectId, migrated.id, l.id));
@@ -65,19 +69,6 @@ export function decodeFrame(
   });
 
   const baseImage = layers.find((l) => l.kind === "base")?.image ?? null;
-    const t = migrated.transparency;
-  let transparency: Frame["transparency"] = null;
-  if (t && t.alpha && t.width > 0 && t.height > 0) {
-    const alpha =
-      t.alpha instanceof Uint8ClampedArray
-        ? t.alpha
-        : Uint8ClampedArray.from(
-            Object.values(t.alpha as unknown as Record<string, number>)
-          );
-    if (alpha.length === t.width * t.height) {
-      transparency = { width: t.width, height: t.height, alpha };
-    }
-  }
   return {
     ...migrated,
     layers,
@@ -85,7 +76,6 @@ export function decodeFrame(
     // Force a recomposite on load: the cache key cannot be trusted across a
     // schema change or a partial write.
     flattenKey: null,
-    transparency,
   };
 }
 
