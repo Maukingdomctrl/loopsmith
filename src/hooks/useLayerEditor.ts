@@ -114,6 +114,8 @@ export interface UseLayerEditorReturn {
   readonly activeHandle: HandleId | null;
 
   readonly dispatch: (action: LayerAction) => void;
+  /** A panel slider finished its drag: the next edit is a new undo step. */
+  readonly endGesture: () => void;
   readonly select: (id: string | null, mode?: "replace" | "toggle" | "add" | "range") => void;
   readonly selectAllLayers: () => void;
   readonly pickAt: (screen: Vec2) => Layer | null;
@@ -241,6 +243,12 @@ const dispatch = useCallback(
     },
     [dispatch]
   );
+
+  /** A panel control (slider) finished its drag: the next edit opens a new
+   *  undo step. Canvas gestures do this on pointer-up themselves. */
+  const endGesture = useCallback(() => {
+    historyOpened.current = false;
+  }, []);
 
   const selectAllLayers = useCallback(() => {
     setSelection(selectAll(frameRef.current.layers));
@@ -596,6 +604,7 @@ const dispatch = useCallback(
     isDragging: gesture.current.kind !== "none",
     activeHandle,
     dispatch,
+    endGesture,
     select,
     selectAllLayers,
     pickAt,
