@@ -48,6 +48,6 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 - Page layout is a fixed flex frame (Toolbar / sidebars / Canvas / Timeline). Nothing should shift size.
 
 ## Known leftovers (safe to delete when tidying)
-`LeftSidebar.tsx`, `EmojiLibrary.tsx`, `lib/templateRegistry.ts`, `lib/createTemplateProject.ts`,
-`lib/geometryPresets.ts`, `src/templates/**`, `components/editor/panels/TransparencyPanel.tsx`,
-the old `frame.transparency` mask path, `tree.txt`, `tsconfig.tsbuildinfo`.
+The old `frame.transparency` mask path, with its unused `components/editor/CanvasRenderer.tsx` and
+`lib/image/transparencyMask.ts`. Nothing writes these masks any more; the canvas still applies one
+from an old saved project (view only, never exported), so removing it touches loading too.

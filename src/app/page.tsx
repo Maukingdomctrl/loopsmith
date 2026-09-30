@@ -18,9 +18,6 @@ import ExportDialog, {
   type ExportPreset,
 } from "@/components/ExportDialog";
 import { exportGIF } from "@/lib/exportGif";
-import { geometryPresets } from "@/lib/geometryPresets";
-import { templateRegistry } from "@/lib/templateRegistry";
-import { createTemplateProject } from "@/lib/createTemplateProject";
 
 import { createEmptyProject, type Project } from "@/types/project";
 import { updateProjectTimestamp } from "@/lib/projects";
