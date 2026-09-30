@@ -86,7 +86,7 @@ function RightSidebar({
           <input
             type="range"
             min={1}
-            max={12}
+            max={24}
             step={1}
             value={duration}
             onChange={(e) => onDurationChange(Number(e.target.value))}
@@ -95,9 +95,9 @@ function RightSidebar({
 
           <div className="mt-2 flex justify-between text-[11px] text-zinc-500">
             <span>1</span>
-            <span>4</span>
             <span>8</span>
-            <span>12</span>
+            <span>16</span>
+            <span>24</span>
           </div>
         </div>
 

@@ -1495,6 +1495,13 @@ const deleteProject = useCallback(
         activeFrame={activeFrame}
         currentFrame={currentIndex}
         onFrameSelect={selectFrame}
+        onHoldChange={(index, hold, firstChange) => {
+          if (firstChange) handleHistoryCommit();
+          updateProjectQuiet((project) => ({
+            ...project,
+            frames: project.frames.map((f, i) => (i === index ? { ...f, duration: hold } : f)),
+          }));
+        }}
         onReorder={(from, to) => {
           const insertAt = from < to ? to - 1 : to;
 

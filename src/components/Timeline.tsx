@@ -8,6 +8,8 @@ import type { CanvasBackground } from "@/types/layer";
 const CELL = 28;
 /** Width of the dashed "+" button at the end of the track. */
 const ADD_W = 36;
+/** Longest hold a span can be dragged to, in ticks. */
+const MAX_HOLD = 24;
 
 interface TimelineProps {
   frames: (string | null)[];
@@ -18,6 +20,8 @@ interface TimelineProps {
   currentFrame: number;
   onFrameSelect: (frame: number) => void;
   onReorder: (from: number, to: number) => void;
+  /** Hold dragged to a new length. `firstChange` is true once per drag (open one undo step). */
+  onHoldChange: (frame: number, hold: number, firstChange: boolean) => void;
   onAddFrame: () => void;
   onImportFrame: (frame: number) => void;
   onDuplicate: () => void;
@@ -33,6 +37,7 @@ export default function Timeline({
   currentFrame,
   onFrameSelect,
   onReorder,
+  onHoldChange,
   onAddFrame,
   onImportFrame,
   onDuplicate,
@@ -101,6 +106,19 @@ export default function Timeline({
     if (frame !== currentFrame) onFrameSelect(frame);
   };
 
+  /* ---------- dragging a span's right edge ---------- */
+
+  const holdDrag = useRef<{ frame: number; x0: number; d0: number; last: number; began: boolean } | null>(null);
+  const moveHold = (e: React.PointerEvent) => {
+    const drag = holdDrag.current;
+    if (!drag) return;
+    const hold = Math.min(MAX_HOLD, Math.max(1, drag.d0 + Math.round((e.clientX - drag.x0) / CELL)));
+    if (hold === drag.last) return;
+    drag.last = hold;
+    onHoldChange(drag.frame, hold, !drag.began);
+    drag.began = true;
+  };
+
   return (
     <footer className="flex h-28 shrink-0 flex-col border-t border-white/10 bg-[#10131A] px-5 py-2">
       <div className="mb-1 flex h-7 shrink-0 items-center justify-between">
@@ -165,57 +183,92 @@ export default function Timeline({
           </div>
 
           <div className="flex h-10 items-stretch">
-            {frames.map((image, i) => (
-              <div
-                key={i}
-                role="button"
-                draggable
-                title={`Frame ${i + 1}`}
-                onClick={() => onFrameSelect(i)}
-                onDoubleClick={() => {
-                  if (!image) onImportFrame(i);
-                }}
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData("text/plain", String(i));
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const raw = e.dataTransfer.getData("text/plain");
-                  const from = Number(raw);
-                  if (raw.trim() === "" || Number.isNaN(from) || from === i) return;
-                  onReorder(from, i);
-                }}
-                className={`relative flex-shrink-0 cursor-pointer overflow-hidden rounded-sm border ${
-                  activeFrame === i
-                    ? "border-indigo-500 bg-indigo-500/20"
-                    : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
-                }`}
-                style={{ width: Math.max(1, durations[i] || 1) * CELL }}
-              >
-                {image ? (
-                  <img
-                    src={image}
-                    alt={`Frame ${i + 1}`}
-                    draggable={false}
-                    className="h-full w-full object-contain"
-                    style={
-                      background && !background.transparent
-                        ? { background: background.color }
-                        : undefined
-                    }
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[10px] text-zinc-500">
-                    {i + 1}
+            {frames.map((image, i) => {
+              const hold = Math.max(1, durations[i] || 1);
+              const selected = activeFrame === i;
+              return (
+                <div
+                  key={i}
+                  role="button"
+                  draggable
+                  title={`Frame ${i + 1} · hold ${hold}`}
+                  onClick={() => onFrameSelect(i)}
+                  onDoubleClick={() => {
+                    if (!image) onImportFrame(i);
+                  }}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(i));
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const raw = e.dataTransfer.getData("text/plain");
+                    const from = Number(raw);
+                    if (raw.trim() === "" || Number.isNaN(from) || from === i) return;
+                    onReorder(from, i);
+                  }}
+                  className={`relative flex flex-shrink-0 cursor-pointer border-y border-r first:border-l ${
+                    selected ? "border-indigo-500 bg-indigo-500/25" : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                  }`}
+                  style={{ width: hold * CELL }}
+                >
+                  {/* Keyframe cell: small thumbnail, dot filled when the frame has pixels. */}
+                  <div className="flex h-full flex-col items-center justify-between py-1" style={{ width: CELL }}>
+                    <div className="h-6 w-6">
+                      {image && (
+                        <img
+                          src={image}
+                          alt={`Frame ${i + 1}`}
+                          draggable={false}
+                          className="h-full w-full object-contain"
+                          style={
+                            background && !background.transparent
+                              ? { background: background.color }
+                              : undefined
+                          }
+                        />
+                      )}
+                    </div>
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        image ? "bg-zinc-200" : "border border-zinc-400"
+                      }`}
+                    />
                   </div>
-                )}
-              </div>
-            ))}
+
+                  {/* Held cells. */}
+                  {hold > 1 && (
+                    <div
+                      className={`h-full flex-1 ${selected ? "bg-indigo-400/15" : "bg-zinc-600/40"}`}
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.08) 0 1px, transparent 1px ${CELL}px)`,
+                      }}
+                    />
+                  )}
+
+                  {/* Right edge: drag to change the hold. */}
+                  <div
+                    title="Drag to change the hold"
+                    className="absolute inset-y-0 -right-1 z-[5] w-2 cursor-col-resize touch-none hover:bg-indigo-400/40"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      e.stopPropagation();
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      holdDrag.current = { frame: i, x0: e.clientX, d0: hold, last: hold, began: false };
+                    }}
+                    onPointerMove={moveHold}
+                    onPointerUp={() => (holdDrag.current = null)}
+                    onPointerCancel={() => (holdDrag.current = null)}
+                  />
+                </div>
+              );
+            })}
 
             <button
               onClick={onAddFrame}
