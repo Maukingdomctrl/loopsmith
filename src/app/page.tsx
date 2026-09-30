@@ -57,6 +57,7 @@ import { removeFrameBackground } from "@/lib/sprite/removeBackground";
 import {
   amountToStretch,
   bounceAmount,
+  bouncePhases,
   hopAmount,
   squashAnchorPoint,
   type SquashAnchor,
@@ -1203,8 +1204,8 @@ const frames = activeProject?.frames.length
     if (!project || isPlaying || selectionActive) return;
     // The anchor comes from each frame's drawn pixels: decode them first.
     await preloadFrameBitmaps(project.frames.flatMap((f) => f.layers));
-    const n = project.frames.length;
-    const landing = editingIndex;
+    // Timed in ticks, so a held frame counts for its whole hold.
+    const phases = bouncePhases(project.frames.map((f) => f.duration), editingIndex);
     updateProject((p) => ({
       ...p,
       frames: p.frames.map((f, i) => {
@@ -1215,13 +1216,13 @@ const frames = activeProject?.frames.length
         const squashed = layerReducer(f, {
           type: "xf/squash",
           id: target.id,
-          stretch: amountToStretch(bounceAmount(i, n, landing, strength)),
+          stretch: amountToStretch(bounceAmount(phases[i], strength)),
           anchor: squashAnchorPoint(target, anchor),
         });
         return layerReducer(squashed, {
           type: "xf/hop",
           id: target.id,
-          height: hopAmount(i, n, landing, hop),
+          height: hopAmount(phases[i], hop),
         });
       }),
     }));

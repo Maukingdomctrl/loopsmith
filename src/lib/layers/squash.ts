@@ -114,13 +114,27 @@ export function bounceAt(t: number): number {
   return Math.abs(1 - 2 * p);
 }
 
-/** Slider amount (% taller / wider) for frame `index` of `count`, with frame
- *  `landing` as the squashed contact frame. */
-export function bounceAmount(index: number, count: number, landing: number, strength: number): number {
-  if (count <= 0) return 0;
-  const t = (((index - landing) % count) + count) % count / count;
-  return Math.round(bounceAt(t) * strength);
+/**
+ * Bounce phase of every frame, in [0, 1): the middle of its time on screen,
+ * counted in ticks from the middle of the landing frame. Held frames count for
+ * their whole hold; with every hold 1 this is simply (index − landing) / count.
+ */
+export function bouncePhases(durations: readonly number[], landing: number): number[] {
+  const holds = durations.map((d) => Math.max(1, d || 1));
+  const total = holds.reduce((sum, d) => sum + d, 0);
+  const mids: number[] = [];
+  let tick = 0;
+  for (const d of holds) {
+    mids.push(tick + d / 2);
+    tick += d;
+  }
+  const zero = mids[landing] ?? 0;
+  return mids.map((m) => ((((m - zero) % total) + total) % total) / total);
 }
+
+/** Slider amount (% taller / wider) at bounce phase `t` (see bouncePhases). */
+export const bounceAmount = (t: number, strength: number): number =>
+  Math.round(bounceAt(t) * strength);
 
 /** How high the hop is at bounce phase t (0 = on the ground, 1 = the top):
  *  a thrown object's parabola, so it moves fast near the ground and hangs at
@@ -130,9 +144,6 @@ export const hopAt = (t: number): number => {
   return 4 * p * (1 - p);
 };
 
-/** Hop (canvas px, up) for frame `index` of `count`, frame `landing` on the ground. */
-export function hopAmount(index: number, count: number, landing: number, height: number): number {
-  if (count <= 0) return 0;
-  const t = (((index - landing) % count) + count) % count / count;
-  return Math.round(hopAt(t) * height * 10) / 10;
-}
+/** Hop (canvas px, up) at bounce phase `t`; the landing frame (0) is on the ground. */
+export const hopAmount = (t: number, height: number): number =>
+  Math.round(hopAt(t) * height * 10) / 10;
