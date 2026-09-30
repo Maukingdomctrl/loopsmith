@@ -172,3 +172,33 @@ export const hopAt = (t: number): number => {
 /** Hop (canvas px, up) at bounce phase `t`; the landing frame (0) is on the ground. */
 export const hopAmount = (t: number, height: number): number =>
   Math.round(hopAt(t) * height * 10) / 10;
+
+/**
+ * How far down (canvas px) a stretch to `k` sits when it grows from the
+ * middle of the drawing instead of from its feet: from the feet it grows only
+ * upward, from the middle half up and half down. Measured from the drawing as
+ * drawn (k = 1), so an earlier squash does not change it.
+ */
+export function midStretchDrop(layer: Layer, k: number): number {
+  const feet = squashAnchorPoint(layer, "bottom");
+  const mid = squashAnchorPoint(layer, "center");
+  const rest = { ...layer, pose: squashPose(layer, 1, feet) };
+  const stretched = { ...rest, pose: squashPose(rest, k, feet) };
+  return matApply(layerMatrix(rest), mid).y - matApply(layerMatrix(stretched), mid).y;
+}
+
+/**
+ * Hop (canvas px, up) for a bounce frame squashed from the feet. In the air a
+ * stretch grows from the middle, as in classic animation, so the frame is
+ * lowered by midStretchDrop, but never below the ground: the frames beside the
+ * landing stretch up from the feet. The landing frame stays on the ground.
+ *
+ * Done through the hop (which each bounce replaces) rather than a different
+ * squash anchor, so bouncing again never drifts the drawing.
+ */
+export function bounceLift(layer: Layer, t: number, strength: number, height: number): number {
+  if (t < 1e-9 || t > 1 - 1e-9) return 0;
+  const k = amountToStretch(bounceAmount(t, strength));
+  const lift = hopAt(t) * height - midStretchDrop(layer, k);
+  return Math.round(Math.max(0, lift) * 10) / 10;
+}
