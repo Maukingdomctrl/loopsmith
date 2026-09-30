@@ -8,8 +8,8 @@ import type { CanvasBackground } from "@/types/layer";
 const CELL = 28;
 /** Width of the dashed "+" button at the end of the track. */
 const ADD_W = 36;
-/** Longest hold a span can be dragged to, in ticks. */
-const MAX_HOLD = 24;
+/** Longest hold a frame can have, in ticks. */
+export const MAX_HOLD = 24;
 
 interface TimelineProps {
   frames: (string | null)[];
@@ -120,7 +120,18 @@ export default function Timeline({
   };
 
   return (
-    <footer className="flex h-28 shrink-0 flex-col border-t border-white/10 bg-[#10131A] px-5 py-2">
+    <footer
+      tabIndex={0}
+      className="flex h-28 shrink-0 flex-col border-t border-white/10 bg-[#10131A] px-5 py-2 outline-none"
+      onKeyDown={(e) => {
+        // Only while the timeline has focus, so the canvas's own Delete is untouched.
+        if (e.key === "Delete" || e.key === "Backspace") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (frames.length > 1) onDeleteFrame();
+        }
+      }}
+    >
       <div className="mb-1 flex h-7 shrink-0 items-center justify-between">
         <p className="text-sm text-zinc-400">
           Timeline ({frames.length} frames) · Frame {currentFrame + 1}

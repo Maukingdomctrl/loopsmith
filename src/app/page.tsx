@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { FolderOpen } from "lucide-react";
 import Toolbar from "@/components/Toolbar";
 import Canvas, { type CanvasView } from "@/components/Canvas";
-import Timeline from "@/components/Timeline";
+import Timeline, { MAX_HOLD } from "@/components/Timeline";
 import RightSidebar from "@/components/RightSidebar";
 import ProjectSidebar from "@/components/ProjectSidebar";
 
@@ -1244,8 +1244,89 @@ const frames = activeProject?.frames.length
     selectFrame(intent.frame);
   })();
 };
-  
-     const createProject = useCallback(() => {
+
+  /* ---------- timeline actions (buttons and Animate shortcuts) ---------- */
+
+  /** Put frames right after the current one and make the first current. One undo step. */
+  const insertAfterCurrent = (made: Frame[]) => {
+    const target = editingIndex + 1;
+    updateProject((project) => {
+      const next = [...project.frames];
+      next.splice(target, 0, ...made);
+      return { ...project, frames: next };
+    });
+    selectFrame(target);
+  };
+
+  /** Lengthen or shorten the current frame's hold by one tick. One undo step. */
+  const nudgeHold = (delta: number) => {
+    const frame = frames[editingIndex];
+    if (!frame) return;
+    const hold = Math.min(MAX_HOLD, Math.max(1, (frame.duration || 1) + delta));
+    if (hold === frame.duration) return;
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f, i) => (i === editingIndex ? { ...f, duration: hold } : f)),
+    }));
+  };
+
+  /** Animate's timeline keys. Read through a ref so the listener is added once. */
+  const timelineKeys = useRef<(e: KeyboardEvent) => void>(() => {});
+  timelineKeys.current = (e) => {
+    const el = e.target as HTMLElement | null;
+    const typing =
+      !!el &&
+      (el.tagName === "TEXTAREA" ||
+        el.tagName === "SELECT" ||
+        el.isContentEditable ||
+        (el.tagName === "INPUT" &&
+          !["range", "color", "checkbox", "radio", "button"].includes((el as HTMLInputElement).type)));
+    if (typing || showExport || showCutter) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    switch (e.key) {
+      case ",":
+        selectFrame(Math.max(0, currentIndex - 1));
+        break;
+      case ".":
+        selectFrame(Math.min(frames.length - 1, currentIndex + 1));
+        break;
+      case "Enter":
+        if (e.repeat || selectionActive || editor.cropDraft) return;
+        if (el?.tagName === "BUTTON") {
+          // Play, rather than clicking the button that kept focus.
+          e.preventDefault();
+          togglePlay();
+          return;
+        }
+        // The canvas also uses Enter (closing a lasso): play only if nothing took it.
+        window.setTimeout(() => {
+          if (!e.defaultPrevented) togglePlay();
+        });
+        return;
+      case "F5":
+        nudgeHold(e.shiftKey ? -1 : 1);
+        break;
+      case "F6":
+        if (!frames[editingIndex]) return;
+        insertAfterCurrent([duplicateFrame(frames[editingIndex])]);
+        break;
+      case "F7":
+        insertAfterCurrent([createBlankFrame()]);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => timelineKeys.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const createProject = useCallback(() => {
   const project = createEmptyProject(
     `Animation ${projectsRef.current.length + 1}`
   );
@@ -1534,22 +1615,7 @@ const deleteProject = useCallback(
           openPicker({ kind: "replace-active", frame });
         }}
                 onClear={clearActiveLayerPixels}
-        onDuplicate={() => {
-          const target = editingIndex + 1;
-
-          updateProject((project) => {
-            const next = [...project.frames];
-
-            next.splice(target, 0, duplicateFrame(next[editingIndex]));
-
-            return {
-              ...project,
-              frames: next,
-            };
-          });
-
-          selectFrame(target);
-        }}
+        onDuplicate={() => insertAfterCurrent([duplicateFrame(frames[editingIndex])])}
         onDeleteFrame={() => {
           if (frames.length === 1) {
             updateProject((project) => ({
