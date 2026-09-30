@@ -13,6 +13,8 @@ import type { Layer } from "@/types/layer";
 import type { Pose } from "@/lib/geometry/pose";
 import { makePose } from "@/lib/geometry/pose";
 import { matApply } from "@/lib/geometry/mat2d";
+import { rectIntersect, rectIsEmpty, rectUnionAll } from "@/lib/geometry/rect";
+import { PENCIL_STRIDE, P_X, P_Y } from "@/lib/pencil/types";
 import { layerContentBox, layerMatrix } from "./layerSpace";
 import { getCachedBitmap } from "./flatten";
 
@@ -29,7 +31,11 @@ export function stretchOf(pose: Pose): number {
 export const stretchToAmount = (k: number) => Math.round((k >= 1 ? k - 1 : 1 - 1 / k) * 100);
 export const amountToStretch = (v: number) => (v >= 0 ? 1 + v / 100 : 1 / (1 - v / 100));
 
-/** Bounds of the pixels actually drawn (alpha > 0) in an image, by image. */
+/** Pixels fainter than this (of 255) are haze, not drawing: AI art often has
+ *  a faint veil that would otherwise put the "feet" in empty space. */
+const ALPHA_MIN = 16;
+
+/** Bounds of the pixels actually drawn (alpha ≥ ALPHA_MIN) in an image, by image. */
 const drawnCache = new Map<string, Rect | null>();
 
 function drawnBounds(src: string): Rect | null {
@@ -47,7 +53,7 @@ function drawnBounds(src: string): Rect | null {
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (d[(y * w + x) * 4 + 3] === 0) continue;
+      if (d[(y * w + x) * 4 + 3] < ALPHA_MIN) continue;
       if (x < x0) x0 = x;
       if (x > x1) x1 = x;
       if (y < y0) y0 = y;
@@ -60,15 +66,34 @@ function drawnBounds(src: string): Rect | null {
   return r;
 }
 
+/** Layer-space bounds of a layer's pencil lines (tip radius included; erase
+ *  strokes left out, since they add nothing). */
+function strokeBounds(layer: Layer): Rect | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of layer.strokes ?? []) {
+    if (s.kind !== "graphite") continue;
+    for (let o = 0; o + P_Y < s.pts.length; o += PENCIL_STRIDE) {
+      const x = s.pts[o + P_X], y = s.pts[o + P_Y];
+      x0 = Math.min(x0, x - s.size);
+      y0 = Math.min(y0, y - s.size);
+      x1 = Math.max(x1, x + s.size);
+      y1 = Math.max(y1, y + s.size);
+    }
+  }
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+
 /**
  * The layer-space point that stays put: the bottom, centre or top of what is
- * actually drawn (so "bottom" means the character's feet, not the empty
- * margin of its cell), falling back to the layer's box.
+ * actually drawn — pixels and pencil lines, inside the layer's crop — so
+ * "bottom" means the character's feet, not the empty margin of its cell.
+ * Falls back to the layer's box.
  */
 export function squashAnchorPoint(layer: Layer, anchor: SquashAnchor): Vec2 {
   const box = layerContentBox(layer);
-  const drawn = layer.image ? drawnBounds(layer.image) : null;
-  const r = drawn ?? box;
+  const parts = [layer.image ? drawnBounds(layer.image) : null, strokeBounds(layer)];
+  const drawn = rectIntersect(rectUnionAll(parts.filter((r): r is Rect => !!r)), box);
+  const r = rectIsEmpty(drawn) ? box : drawn;
   return {
     x: r.x + r.w / 2,
     y: anchor === "bottom" ? r.y + r.h : anchor === "top" ? r.y : r.y + r.h / 2,
