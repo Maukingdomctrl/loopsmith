@@ -31,7 +31,6 @@ export function createBlankFrame(): Frame {
     layers: [base],
     activeLayerId: base.id,
     crop: null,
-    transparency: null,
     flattenKey: null,
     flattenedAt: 0,
     legacyPosePending: false,

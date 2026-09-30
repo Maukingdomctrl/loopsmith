@@ -54,8 +54,8 @@ export function saveHistory(
   _undo: readonly Snapshot[],
   _redo: readonly Snapshot[]
 ): void {
-  // Undo history is session-only: snapshots hold layer bitmaps and
-  // transparency masks that do not fit in localStorage.
+  // Undo history is session-only: snapshots hold layer bitmaps that do not
+  // fit in localStorage.
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.removeItem(KEY);

@@ -31,8 +31,6 @@ export function loadProjects(): StoredProject[] {
   activeLayerId: frame.activeLayerId ?? "",
   crop: frame.crop ?? null,
 
-  transparency: frame.transparency ?? null,
-
   flattenKey: frame.flattenKey ?? "",
   flattenedAt: frame.flattenedAt ?? 0,
   legacyPosePending: frame.legacyPosePending ?? false,
@@ -70,10 +68,6 @@ export function saveProjects(projects: Project[]) {
   layers: frame.layers,
   activeLayerId: frame.activeLayerId,
   crop: frame.crop,
-
-  
-  transparency: frame.transparency,
-
 
   flattenKey: frame.flattenKey,
   flattenedAt: frame.flattenedAt,

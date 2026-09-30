@@ -855,8 +855,7 @@ const frames = activeProject?.frames.length
           existing.stab?.dy === updatedFrame.stab?.dy &&
           existing.layers === updatedFrame.layers &&
           existing.activeLayerId === updatedFrame.activeLayerId &&
-          existing.crop === updatedFrame.crop &&
-          existing.transparency === updatedFrame.transparency
+          existing.crop === updatedFrame.crop
         ) {
           // No real change — return SAME object so React bails out (no re-render).
           return prev;
