@@ -833,6 +833,7 @@ const commit = useCallback((next: Frame) => {
         intensity: brushNow.intensity,
         material: brushNow.material,
         angle: (brushNow.angle * Math.PI) / 180,
+        blend: brushNow.mode,
         // a pen (or a stylus the browser calls "touch") has real pressure;
         // a mouse or finger gets the brush's own stand-in
         hasPressure: reportsPressure(e),
