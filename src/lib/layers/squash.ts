@@ -97,3 +97,36 @@ export function squashPose(layer: Layer, k: number, local: Vec2): Pose {
     },
   });
 }
+
+/* ---------------- bounce ---------------- */
+
+/**
+ * One bounce cycle as squash/stretch, for phase t in [0, 1): land (squash),
+ * rise (stretch), top of the jump (as drawn), fall (stretch), land again.
+ * −1 = full squash, +1 = full stretch; smooth between the key poses.
+ */
+const BOUNCE_KEYS: readonly [number, number][] = [
+  [0, -1], [0.25, 0.8], [0.5, 0], [0.75, 0.8], [1, -1],
+];
+
+export function bounceAt(t: number): number {
+  const p = ((t % 1) + 1) % 1;
+  for (let i = 1; i < BOUNCE_KEYS.length; i++) {
+    const [t1, v1] = BOUNCE_KEYS[i];
+    if (p <= t1) {
+      const [t0, v0] = BOUNCE_KEYS[i - 1];
+      const u = (p - t0) / (t1 - t0);
+      const s = (1 - Math.cos(Math.PI * u)) / 2; // ease in and out
+      return v0 + (v1 - v0) * s;
+    }
+  }
+  return BOUNCE_KEYS[0][1];
+}
+
+/** Slider amount (% taller / wider) for frame `index` of `count`, with frame
+ *  `landing` as the squashed contact frame. */
+export function bounceAmount(index: number, count: number, landing: number, strength: number): number {
+  if (count <= 0) return 0;
+  const t = (((index - landing) % count) + count) % count / count;
+  return Math.round(bounceAt(t) * strength);
+}
