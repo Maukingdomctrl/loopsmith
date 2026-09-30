@@ -146,6 +146,9 @@ export interface Layer {
    *  (or, when clipped, only its clipping group). Opacity is its strength. */
   readonly adjust?: Adjustment;
   readonly mask?: LayerMask;
+  /** Canvas px the Bounce lifted this layer by, so a new bounce replaces it
+   *  instead of stacking on top. */
+  readonly hop?: number;
 
   /** Pencil strokes, stored as recorded physics in layer space and drawn over
    *  `image` analytically at render time. Never baked unless a pixel tool

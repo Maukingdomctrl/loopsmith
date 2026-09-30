@@ -25,7 +25,7 @@ interface Props {
   onEnd: () => void;
   frameCount?: number;
   /** Apply a bounce cycle across all frames, this frame landing. */
-  onBounce?: (layer: Layer | null, strength: number, anchor: SquashAnchor) => void;
+  onBounce?: (layer: Layer | null, strength: number, anchor: SquashAnchor, hop: number) => void;
 }
 
 const ANCHORS: { id: SquashAnchor; label: string }[] = [
@@ -39,6 +39,7 @@ export default function SquashPanel({
 }: Props) {
   const [anchor, setAnchor] = useState<SquashAnchor>("bottom");
   const [bounce, setBounce] = useState(25);
+  const [hop, setHop] = useState(30);
   const locked = !layer || layer.locked || !!disabled;
   const amount = layer ? stretchToAmount(stretchOf(layer.pose)) : 0;
 
@@ -114,10 +115,23 @@ export default function SquashPanel({
               className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
             />
           </label>
+          <label className="block text-[10px] text-zinc-400">
+            <span className="flex justify-between">
+              <span>Hop height</span>
+              <span className="text-zinc-300">{hop === 0 ? "none" : `${hop} px`}</span>
+            </span>
+            <input
+              type="range" min={0} max={150} step={1}
+              value={hop}
+              disabled={locked}
+              onChange={(e) => setHop(Number(e.target.value))}
+              className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
+            />
+          </label>
           <button
-            onClick={() => onBounce(layer, bounce, anchor)}
+            onClick={() => onBounce(layer, bounce, anchor, hop)}
             disabled={locked || frameCount < 2}
-            title="This frame lands (squashed); the others follow a bounce: stretched going up, as drawn at the top, stretched coming down"
+            title="This frame lands (squashed, on the ground); the others follow a bounce: stretched going up, highest and as drawn at the top, stretched coming down. Bouncing again replaces the previous hop."
             className="w-full rounded bg-zinc-800 py-1 text-[10px] text-zinc-300 hover:bg-zinc-700 disabled:opacity-40"
           >
             Bounce across all frames

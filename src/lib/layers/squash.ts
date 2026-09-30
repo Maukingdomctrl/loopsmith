@@ -130,3 +130,18 @@ export function bounceAmount(index: number, count: number, landing: number, stre
   const t = (((index - landing) % count) + count) % count / count;
   return Math.round(bounceAt(t) * strength);
 }
+
+/** How high the hop is at bounce phase t (0 = on the ground, 1 = the top):
+ *  a thrown object's parabola, so it moves fast near the ground and hangs at
+ *  the top. */
+export const hopAt = (t: number): number => {
+  const p = ((t % 1) + 1) % 1;
+  return 4 * p * (1 - p);
+};
+
+/** Hop (canvas px, up) for frame `index` of `count`, frame `landing` on the ground. */
+export function hopAmount(index: number, count: number, landing: number, height: number): number {
+  if (count <= 0) return 0;
+  const t = (((index - landing) % count) + count) % count / count;
+  return Math.round(hopAt(t) * height * 10) / 10;
+}

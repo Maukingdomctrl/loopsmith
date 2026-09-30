@@ -60,6 +60,7 @@ import { removeFrameBackground } from "@/lib/sprite/removeBackground";
 import {
   amountToStretch,
   bounceAmount,
+  hopAmount,
   squashAnchorPoint,
   type SquashAnchor,
 } from "@/lib/layers/squash";
@@ -1137,7 +1138,12 @@ const frames = activeProject?.frames.length
    * with the current frame as the landing. Acts on the layer's linked copies
    * when it has them, otherwise on each frame's base layer. One undo step.
    */
-  const applyBounce = async (layer: Layer | null, strength: number, anchor: SquashAnchor) => {
+  const applyBounce = async (
+    layer: Layer | null,
+    strength: number,
+    anchor: SquashAnchor,
+    hop: number
+  ) => {
     const project = projectsRef.current.find((p) => p.id === activeProjectId);
     if (!project || isPlaying || selectionActive) return;
     // The anchor comes from each frame's drawn pixels: decode them first.
@@ -1151,11 +1157,16 @@ const frames = activeProject?.frames.length
           ? f.layers.find((l) => l.linkId === layer.linkId)
           : f.layers.find((l) => l.kind === "base");
         if (!target || target.locked) return f;
-        return layerReducer(f, {
+        const squashed = layerReducer(f, {
           type: "xf/squash",
           id: target.id,
           stretch: amountToStretch(bounceAmount(i, n, landing, strength)),
           anchor: squashAnchorPoint(target, anchor),
+        });
+        return layerReducer(squashed, {
+          type: "xf/hop",
+          id: target.id,
+          height: hopAmount(i, n, landing, hop),
         });
       }),
     }));
