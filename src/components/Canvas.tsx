@@ -105,7 +105,8 @@ interface CanvasProps {
   editFrame: Frame;
   isPlaying: boolean;
 
-  previousFrame: Frame | null;
+  /** Neighbours to onion-skin: offset < 0 is before the current frame, > 0 after. */
+  onionFrames: { frame: Frame; offset: number }[];
   onionSkin: boolean;
 
   view: CanvasView;
@@ -175,6 +176,10 @@ const ONION_BACKGROUND: CanvasBackground = {
   checkerboard: false,
 };
 
+/** Onion tints, as in Animate: frames before are red-ish, frames after green-ish. View only. */
+const ONION_BEFORE = "rgb(255, 70, 70)";
+const ONION_AFTER = "rgb(40, 200, 90)";
+
 export default function Canvas({
   projectId,
   containerRef,
@@ -184,7 +189,7 @@ export default function Canvas({
   frame,
   editFrame,
   isPlaying,
-  previousFrame,
+  onionFrames,
   onionSkin,
   view,
   onViewChange,
@@ -205,6 +210,8 @@ export default function Canvas({
 }: CanvasProps) {
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
   const onionCanvasRef = useRef<HTMLCanvasElement>(null);
+  /** Scratch surface where each onion frame is drawn and tinted. */
+  const onionScratch = useRef<HTMLCanvasElement | null>(null);
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null);
 
   /** Local alias so existing coordinate helpers keep reading naturally. */
@@ -1160,7 +1167,7 @@ const commit = useCallback((next: Frame) => {
     let cancelled = false;
     const pending = [
       ...frame.layers,
-      ...(previousFrame?.layers ?? []),
+      ...onionFrames.flatMap((o) => o.frame.layers),
     ].filter((l) => (l.image || l.mask?.image) && l.visible);
 
     if (!pending.length) return;
@@ -1172,7 +1179,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [frame.layers, previousFrame?.layers]);
+  }, [frame.layers, onionFrames]);
 
   /**
    * Resolve any layer whose native size is still unknown.
@@ -1267,7 +1274,7 @@ const commit = useCallback((next: Frame) => {
     decodeGeneration,
   ]);
 
-  /* ---------- Onion skin (honours the previous frame's own transform) ---------- */
+  /* ---------- Onion skin (honours each neighbour's own transform) ---------- */
 
   useEffect(() => {
     const canvas = onionCanvasRef.current;
@@ -1279,15 +1286,40 @@ const commit = useCallback((next: Frame) => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-    if (!onionSkin || !previousFrame) return;
-    if (!previousFrame.layers.some((l) => (l.image || l.strokes?.length) && l.visible)) return;
+    if (!onionSkin || !onionFrames.length) return;
 
-    drawFrameLayers(ctx, previousFrame, CANVAS_SIZE, {
-      background: ONION_BACKGROUND,
-      resolve: domResolver(),
-      checkerboard: false,
-    });
-  }, [onionSkin, previousFrame, decodeGeneration]);
+    const scratch = (onionScratch.current ??= document.createElement("canvas"));
+    scratch.width = CANVAS_SIZE;
+    scratch.height = CANVAS_SIZE;
+    const sctx = scratch.getContext("2d");
+    if (!sctx) return;
+
+    // Farthest first, so nearer frames sit on top; each step away fades a little more.
+    const ordered = [...onionFrames].sort((a, b) => Math.abs(b.offset) - Math.abs(a.offset));
+    for (const { frame: neighbour, offset } of ordered) {
+      if (!neighbour.layers.some((l) => (l.image || l.strokes?.length) && l.visible)) continue;
+
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = "source-over";
+      sctx.globalAlpha = 1;
+      sctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      drawFrameLayers(sctx, neighbour, CANVAS_SIZE, {
+        background: ONION_BACKGROUND,
+        resolve: domResolver(),
+        checkerboard: false,
+      });
+
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = "source-atop";
+      sctx.globalAlpha = 0.65;
+      sctx.fillStyle = offset < 0 ? ONION_BEFORE : ONION_AFTER;
+      sctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+      ctx.globalAlpha = Math.max(0.25, 1 - (Math.abs(offset) - 1) * 0.18);
+      ctx.drawImage(scratch, 0, 0);
+    }
+    ctx.globalAlpha = 1;
+  }, [onionSkin, onionFrames, decodeGeneration]);
 
   /* ---------- Floating selection layer ---------- */
 

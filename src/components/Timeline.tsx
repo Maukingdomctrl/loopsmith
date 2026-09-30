@@ -10,6 +10,8 @@ const CELL = 28;
 const ADD_W = 36;
 /** Longest hold a frame can have, in ticks. */
 export const MAX_HOLD = 24;
+/** Most frames the onion skin can show on each side. */
+const ONION_MAX = 5;
 
 interface TimelineProps {
   frames: (string | null)[];
@@ -20,6 +22,9 @@ interface TimelineProps {
   /** Selected frames (highlighted; what Delete, copy and dragging act on). */
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  /** Onion-skin frames before / after the current one; undefined while onion skin is off. */
+  onion?: { before: number; after: number };
+  onOnionChange: (onion: { before: number; after: number }) => void;
   activeFrame: number;
   /** Where the playhead is: the frame on the canvas (the playing one during playback). */
   currentFrame: number;
@@ -44,6 +49,8 @@ export default function Timeline({
   frameIds,
   selectedIds,
   onSelectionChange,
+  onion,
+  onOnionChange,
   activeFrame,
   currentFrame,
   onFrameSelect,
@@ -84,7 +91,7 @@ export default function Timeline({
   }, []);
 
   // The ruler runs at least to the right edge, like empty cells in Animate.
-  const rulerTicks = Math.max(totalTicks + 2, Math.ceil(viewWidth / CELL));
+  const rulerTicks = Math.max(totalTicks + ONION_MAX + 1, Math.ceil(viewWidth / CELL));
   const contentWidth = Math.max(totalTicks * CELL + ADD_W + 8, rulerTicks * CELL);
 
   const playhead = Math.min(Math.max(0, currentFrame), starts.length - 1);
@@ -118,6 +125,44 @@ export default function Timeline({
     const frame = frameAtTick(tick);
     if (frame !== currentFrame) onFrameSelect(frame);
   };
+
+  /* ---------- onion-skin markers on the ruler ---------- */
+
+  const onionDrag = useRef<"before" | "after" | null>(null);
+  const onionFirst = Math.max(0, playhead - (onion?.before ?? 0));
+  const onionLast = playhead + (onion?.after ?? 0);
+  const onionLeft = starts[onionFirst] * CELL;
+  // Past the last frame the marker runs on into the empty ruler cells, one per frame.
+  const onionRight =
+    onionLast < starts.length
+      ? (starts[onionLast] + Math.max(1, durations[onionLast] || 1)) * CELL
+      : (totalTicks + onionLast - (starts.length - 1)) * CELL;
+
+  const moveOnion = (e: React.PointerEvent) => {
+    const side = onionDrag.current;
+    const ruler = e.currentTarget.parentElement;
+    if (!side || !onion || !ruler) return;
+    // Brackets snap to the nearest cell edge.
+    const edge = Math.round((e.clientX - ruler.getBoundingClientRect().left) / CELL);
+    const count =
+      side === "before"
+        ? playhead - frameAtTick(Math.max(0, edge))
+        : (edge > totalTicks ? starts.length - 1 + edge - totalTicks : frameAtTick(Math.max(0, edge - 1))) - playhead;
+    const next = Math.min(ONION_MAX, Math.max(0, count));
+    if (next !== onion[side]) onOnionChange({ ...onion, [side]: next });
+  };
+
+  const onionHandle = (side: "before" | "after") => ({
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.stopPropagation(); // not a scrub
+      e.currentTarget.setPointerCapture(e.pointerId);
+      onionDrag.current = side;
+    },
+    onPointerMove: moveOnion,
+    onPointerUp: () => (onionDrag.current = null),
+    onPointerCancel: () => (onionDrag.current = null),
+  });
 
   /* ---------- dragging a span's right edge ---------- */
 
@@ -214,7 +259,7 @@ export default function Timeline({
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
+        className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden pl-2 [scrollbar-width:thin]"
       >
         <div className="relative" style={{ width: contentWidth }}>
           {/* Ruler: one mark per tick, a number every 5th. Click or drag to scrub. */}
@@ -249,6 +294,28 @@ export default function Timeline({
                   {n}
                 </span>
               ))}
+
+            {/* Onion-skin markers: drag the brackets to show more or fewer frames. */}
+            {onion && (
+              <>
+                <div
+                  className="pointer-events-none absolute inset-y-0 bg-white/5"
+                  style={{ left: onionLeft, width: onionRight - onionLeft }}
+                />
+                <div
+                  {...onionHandle("before")}
+                  title={`Onion skin: ${onion.before} before (drag)`}
+                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-l-sm border-y-2 border-l-2 border-red-400"
+                  style={{ left: onionLeft - 6 }}
+                />
+                <div
+                  {...onionHandle("after")}
+                  title={`Onion skin: ${onion.after} after (drag)`}
+                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-r-sm border-y-2 border-r-2 border-green-400"
+                  style={{ left: onionRight }}
+                />
+              </>
+            )}
           </div>
 
           <div

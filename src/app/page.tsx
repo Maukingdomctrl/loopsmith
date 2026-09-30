@@ -131,6 +131,8 @@ export default function Home() {
   /** Timeline selection, by frame id. Empty = just the current frame. */
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [onionSkin, setOnionSkin] = useState(true);
+  /** How many frames the onion skin shows before / after the current one (view only). */
+  const [onionRange, setOnionRange] = useState({ before: 1, after: 1 });
   const [showProjects, setShowProjects] = useState(false);
 
  
@@ -507,6 +509,17 @@ const frames = activeProject?.frames.length
 
   // Frame shown on canvas
   const currentIndex = isPlaying ? previewFrame : activeFrame;
+
+  /** Onion-skin neighbours of the frame being edited. Hidden during playback, as in Animate. */
+  const onionFrames = useMemo(() => {
+    if (!onionSkin || isPlaying) return [];
+    const out: { frame: Frame; offset: number }[] = [];
+    for (let d = -onionRange.before; d <= onionRange.after; d++) {
+      const neighbour = d !== 0 ? frames[editingIndex + d] : undefined;
+      if (neighbour) out.push({ frame: neighbour, offset: d });
+    }
+    return out;
+  }, [onionSkin, isPlaying, onionRange, frames, editingIndex]);
 
   // ---------- Playback ----------
   const durationSignature = useMemo(
@@ -1509,10 +1522,7 @@ const deleteProject = useCallback(
           }
           editFrame={editFrame}
           onSaveStatusChange={setSaveStatus}
-          previousFrame={(() => {
-            const i = isPlaying ? previewFrame : editingIndex;
-            return i > 0 ? frames[i - 1] ?? null : null;
-          })()}
+          onionFrames={onionFrames}
           onionSkin={onionSkin}
           isPlaying={isPlaying}
           view={canvasView}
@@ -1628,6 +1638,8 @@ const deleteProject = useCallback(
         frameIds={timelineIds}
         selectedIds={selection}
         onSelectionChange={setSelectedIds}
+        onion={onionSkin ? onionRange : undefined}
+        onOnionChange={setOnionRange}
         background={background}
         activeFrame={activeFrame}
         currentFrame={currentIndex}
