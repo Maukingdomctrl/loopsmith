@@ -13,6 +13,8 @@ import type { Layer } from "@/types/layer";
 import type { Pose } from "@/lib/geometry/pose";
 import { makePose } from "@/lib/geometry/pose";
 import { matApply } from "@/lib/geometry/mat2d";
+import { rectIntersect, rectIsEmpty, rectUnionAll } from "@/lib/geometry/rect";
+import { PENCIL_STRIDE, P_X, P_Y } from "@/lib/pencil/types";
 import { layerContentBox, layerMatrix } from "./layerSpace";
 import { getCachedBitmap } from "./flatten";
 
@@ -29,7 +31,11 @@ export function stretchOf(pose: Pose): number {
 export const stretchToAmount = (k: number) => Math.round((k >= 1 ? k - 1 : 1 - 1 / k) * 100);
 export const amountToStretch = (v: number) => (v >= 0 ? 1 + v / 100 : 1 / (1 - v / 100));
 
-/** Bounds of the pixels actually drawn (alpha > 0) in an image, by image. */
+/** Pixels fainter than this (of 255) are haze, not drawing: AI art often has
+ *  a faint veil that would otherwise put the "feet" in empty space. */
+const ALPHA_MIN = 16;
+
+/** Bounds of the pixels actually drawn (alpha ≥ ALPHA_MIN) in an image, by image. */
 const drawnCache = new Map<string, Rect | null>();
 
 function drawnBounds(src: string): Rect | null {
@@ -47,7 +53,7 @@ function drawnBounds(src: string): Rect | null {
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (d[(y * w + x) * 4 + 3] === 0) continue;
+      if (d[(y * w + x) * 4 + 3] < ALPHA_MIN) continue;
       if (x < x0) x0 = x;
       if (x > x1) x1 = x;
       if (y < y0) y0 = y;
@@ -60,15 +66,34 @@ function drawnBounds(src: string): Rect | null {
   return r;
 }
 
+/** Layer-space bounds of a layer's pencil lines (tip radius included; erase
+ *  strokes left out, since they add nothing). */
+function strokeBounds(layer: Layer): Rect | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of layer.strokes ?? []) {
+    if (s.kind !== "graphite") continue;
+    for (let o = 0; o + P_Y < s.pts.length; o += PENCIL_STRIDE) {
+      const x = s.pts[o + P_X], y = s.pts[o + P_Y];
+      x0 = Math.min(x0, x - s.size);
+      y0 = Math.min(y0, y - s.size);
+      x1 = Math.max(x1, x + s.size);
+      y1 = Math.max(y1, y + s.size);
+    }
+  }
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+
 /**
  * The layer-space point that stays put: the bottom, centre or top of what is
- * actually drawn (so "bottom" means the character's feet, not the empty
- * margin of its cell), falling back to the layer's box.
+ * actually drawn — pixels and pencil lines, inside the layer's crop — so
+ * "bottom" means the character's feet, not the empty margin of its cell.
+ * Falls back to the layer's box.
  */
 export function squashAnchorPoint(layer: Layer, anchor: SquashAnchor): Vec2 {
   const box = layerContentBox(layer);
-  const drawn = layer.image ? drawnBounds(layer.image) : null;
-  const r = drawn ?? box;
+  const parts = [layer.image ? drawnBounds(layer.image) : null, strokeBounds(layer)];
+  const drawn = rectIntersect(rectUnionAll(parts.filter((r): r is Rect => !!r)), box);
+  const r = rectIsEmpty(drawn) ? box : drawn;
   return {
     x: r.x + r.w / 2,
     y: anchor === "bottom" ? r.y + r.h : anchor === "top" ? r.y : r.y + r.h / 2,
@@ -101,35 +126,40 @@ export function squashPose(layer: Layer, k: number, local: Vec2): Pose {
 /* ---------------- bounce ---------------- */
 
 /**
- * One bounce cycle as squash/stretch, for phase t in [0, 1): land (squash),
- * rise (stretch), top of the jump (as drawn), fall (stretch), land again.
- * −1 = full squash, +1 = full stretch; smooth between the key poses.
+ * One bounce cycle as squash/stretch, for phase t in [0, 1), where 0 is the
+ * landing frame: squashed on the ground (−1); in the air, stretched in
+ * proportion to speed, so the frames just before and after the landing are
+ * the most stretched and the top of the jump (no speed) is as drawn.
+ *
+ * Speed is the slope of `hopAt` (4 − 8t), normalised: |1 − 2t|.
  */
-const BOUNCE_KEYS: readonly [number, number][] = [
-  [0, -1], [0.25, 0.8], [0.5, 0], [0.75, 0.8], [1, -1],
-];
-
 export function bounceAt(t: number): number {
   const p = ((t % 1) + 1) % 1;
-  for (let i = 1; i < BOUNCE_KEYS.length; i++) {
-    const [t1, v1] = BOUNCE_KEYS[i];
-    if (p <= t1) {
-      const [t0, v0] = BOUNCE_KEYS[i - 1];
-      const u = (p - t0) / (t1 - t0);
-      const s = (1 - Math.cos(Math.PI * u)) / 2; // ease in and out
-      return v0 + (v1 - v0) * s;
-    }
-  }
-  return BOUNCE_KEYS[0][1];
+  if (p < 1e-9 || p > 1 - 1e-9) return -1;
+  return Math.abs(1 - 2 * p);
 }
 
-/** Slider amount (% taller / wider) for frame `index` of `count`, with frame
- *  `landing` as the squashed contact frame. */
-export function bounceAmount(index: number, count: number, landing: number, strength: number): number {
-  if (count <= 0) return 0;
-  const t = (((index - landing) % count) + count) % count / count;
-  return Math.round(bounceAt(t) * strength);
+/**
+ * Bounce phase of every frame, in [0, 1): the middle of its time on screen,
+ * counted in ticks from the middle of the landing frame. Held frames count for
+ * their whole hold; with every hold 1 this is simply (index − landing) / count.
+ */
+export function bouncePhases(durations: readonly number[], landing: number): number[] {
+  const holds = durations.map((d) => Math.max(1, d || 1));
+  const total = holds.reduce((sum, d) => sum + d, 0);
+  const mids: number[] = [];
+  let tick = 0;
+  for (const d of holds) {
+    mids.push(tick + d / 2);
+    tick += d;
+  }
+  const zero = mids[landing] ?? 0;
+  return mids.map((m) => ((((m - zero) % total) + total) % total) / total);
 }
+
+/** Slider amount (% taller / wider) at bounce phase `t` (see bouncePhases). */
+export const bounceAmount = (t: number, strength: number): number =>
+  Math.round(bounceAt(t) * strength);
 
 /** How high the hop is at bounce phase t (0 = on the ground, 1 = the top):
  *  a thrown object's parabola, so it moves fast near the ground and hangs at
@@ -139,9 +169,6 @@ export const hopAt = (t: number): number => {
   return 4 * p * (1 - p);
 };
 
-/** Hop (canvas px, up) for frame `index` of `count`, frame `landing` on the ground. */
-export function hopAmount(index: number, count: number, landing: number, height: number): number {
-  if (count <= 0) return 0;
-  const t = (((index - landing) % count) + count) % count / count;
-  return Math.round(hopAt(t) * height * 10) / 10;
-}
+/** Hop (canvas px, up) at bounce phase `t`; the landing frame (0) is on the ground. */
+export const hopAmount = (t: number, height: number): number =>
+  Math.round(hopAt(t) * height * 10) / 10;
