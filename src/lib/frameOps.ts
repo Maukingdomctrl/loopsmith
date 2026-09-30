@@ -116,6 +116,24 @@ export function reorderFrames(
   return { frames: next, insertedAt: clamped };
 }
 
+/**
+ * Move a block of frames, kept in their order, to insertion slot `slot`
+ * (same ORIGINAL-indexing convention as reorderFrames). `insertedAt` is where
+ * the block starts afterwards.
+ */
+export function moveFrames(
+  frames: readonly Frame[],
+  ids: readonly string[],
+  slot: number
+): { frames: Frame[]; insertedAt: number } {
+  const moving = new Set(ids);
+  const block = frames.filter((f) => moving.has(f.id));
+  if (!block.length) return { frames: [...frames], insertedAt: 0 };
+  const before = frames.slice(0, slot).filter((f) => !moving.has(f.id));
+  const after = frames.slice(slot).filter((f) => !moving.has(f.id));
+  return { frames: [...before, ...block, ...after], insertedAt: before.length };
+}
+
 /** L2 must survive reordering unchanged: the correction belongs to the frame's
  *  pixels, not to its position. Re-running Auto Stabilize after a reorder will
  *  produce a DIFFERENT solve (the temporal graph changed), which is correct —

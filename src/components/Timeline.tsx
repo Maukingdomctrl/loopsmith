@@ -15,10 +15,16 @@ interface TimelineProps {
   frames: (string | null)[];
   /** Hold of each frame, in ticks. */
   durations: number[];
+  /** Id of each frame, so the selection survives reordering. */
+  frameIds: string[];
+  /** Selected frames (highlighted; what Delete, copy and dragging act on). */
+  selectedIds: string[];
+  onSelectionChange: (ids: string[]) => void;
   activeFrame: number;
   /** Where the playhead is: the frame on the canvas (the playing one during playback). */
   currentFrame: number;
   onFrameSelect: (frame: number) => void;
+  /** Move frame `from` (with the rest of the selection, if it is selected) to insertion slot `to`. */
   onReorder: (from: number, to: number) => void;
   /** Hold dragged to a new length. `firstChange` is true once per drag (open one undo step). */
   onHoldChange: (frame: number, hold: number, firstChange: boolean) => void;
@@ -27,12 +33,17 @@ interface TimelineProps {
   onDuplicate: () => void;
   onClear: () => void;
   onDeleteFrame: () => void;
+  onCopy: () => void;
+  onPaste: () => void;
   background?: CanvasBackground;
 }
 
 export default function Timeline({
   frames,
   durations,
+  frameIds,
+  selectedIds,
+  onSelectionChange,
   activeFrame,
   currentFrame,
   onFrameSelect,
@@ -43,6 +54,8 @@ export default function Timeline({
   onDuplicate,
   onClear,
   onDeleteFrame,
+  onCopy,
+  onPaste,
   background,
 }: TimelineProps) {
   const actionClass =
@@ -119,6 +132,45 @@ export default function Timeline({
     drag.began = true;
   };
 
+  /* ---------- selecting and moving frames ---------- */
+
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  /** Where a Shift-click range starts: the last plain or Ctrl-click. */
+  const anchorId = useRef<string | null>(null);
+
+  const clickFrame = (e: React.MouseEvent, i: number) => {
+    const id = frameIds[i];
+    if (e.shiftKey) {
+      const anchor = frameIds.indexOf(anchorId.current ?? "");
+      const from = anchor >= 0 ? anchor : activeFrame;
+      const [lo, hi] = from < i ? [from, i] : [i, from];
+      onFrameSelect(i);
+      onSelectionChange(frameIds.slice(lo, hi + 1));
+    } else if (e.ctrlKey || e.metaKey) {
+      anchorId.current = id;
+      if (selected.has(id)) {
+        onSelectionChange(selectedIds.filter((s) => s !== id));
+      } else {
+        onFrameSelect(i);
+        onSelectionChange([...selectedIds, id]);
+      }
+    } else {
+      anchorId.current = id;
+      onFrameSelect(i);
+      onSelectionChange([id]);
+    }
+  };
+
+  /** Drop slot under the pointer: before a frame on its left half, after it on its right half. */
+  const [dropSlot, setDropSlot] = useState<number | null>(null);
+  const slotAt = (e: React.DragEvent<HTMLDivElement>) => {
+    const x = (e.clientX - e.currentTarget.getBoundingClientRect().left) / CELL;
+    for (let i = 0; i < starts.length; i++) {
+      if (x < starts[i] + Math.max(1, durations[i] || 1) / 2) return i;
+    }
+    return starts.length;
+  };
+
   return (
     <footer
       tabIndex={0}
@@ -129,6 +181,12 @@ export default function Timeline({
           e.preventDefault();
           e.stopPropagation();
           if (frames.length > 1) onDeleteFrame();
+        } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+          const key = e.key.toLowerCase();
+          if (key === "c") onCopy();
+          else if (key === "v") onPaste();
+          else return;
+          e.preventDefault();
         }
       }}
     >
@@ -147,7 +205,7 @@ export default function Timeline({
           <button
             onClick={onDeleteFrame}
             className={`${actionClass} hover:bg-red-900/40 hover:text-red-300`}
-            title="Delete this frame"
+            title="Delete the selected frames"
           >
             <Trash2 size={14} /> Delete
           </button>
@@ -193,37 +251,52 @@ export default function Timeline({
               ))}
           </div>
 
-          <div className="flex h-10 items-stretch">
+          <div
+            className="relative flex h-10 select-none items-stretch"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              const slot = slotAt(e);
+              if (slot !== dropSlot) setDropSlot(slot);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropSlot(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDropSlot(null);
+              const raw = e.dataTransfer.getData("text/plain");
+              const from = Number(raw);
+              if (raw.trim() === "" || Number.isNaN(from)) return;
+              onReorder(from, slotAt(e));
+            }}
+          >
             {frames.map((image, i) => {
               const hold = Math.max(1, durations[i] || 1);
-              const selected = activeFrame === i;
+              const isSelected = selected.has(frameIds[i]);
               return (
                 <div
-                  key={i}
+                  key={frameIds[i] ?? i}
                   role="button"
                   draggable
                   title={`Frame ${i + 1} · hold ${hold}`}
-                  onClick={() => onFrameSelect(i)}
+                  onClick={(e) => clickFrame(e, i)}
                   onDoubleClick={() => {
                     if (!image) onImportFrame(i);
                   }}
                   onDragStart={(e) => {
+                    // Dragging an unselected frame moves just that frame.
+                    if (!isSelected) {
+                      anchorId.current = frameIds[i];
+                      onFrameSelect(i);
+                      onSelectionChange([frameIds[i]]);
+                    }
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/plain", String(i));
                   }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const raw = e.dataTransfer.getData("text/plain");
-                    const from = Number(raw);
-                    if (raw.trim() === "" || Number.isNaN(from) || from === i) return;
-                    onReorder(from, i);
-                  }}
+                  onDragEnd={() => setDropSlot(null)}
                   className={`relative flex flex-shrink-0 cursor-pointer border-y border-r first:border-l ${
-                    selected ? "border-indigo-500 bg-indigo-500/25" : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                    isSelected ? "border-indigo-500 bg-indigo-500/25" : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
                   }`}
                   style={{ width: hold * CELL }}
                 >
@@ -254,7 +327,7 @@ export default function Timeline({
                   {/* Held cells. */}
                   {hold > 1 && (
                     <div
-                      className={`h-full flex-1 ${selected ? "bg-indigo-400/15" : "bg-zinc-600/40"}`}
+                      className={`h-full flex-1 ${isSelected ? "bg-indigo-400/15" : "bg-zinc-600/40"}`}
                       style={{
                         backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.08) 0 1px, transparent 1px ${CELL}px)`,
                       }}
@@ -280,6 +353,14 @@ export default function Timeline({
                 </div>
               );
             })}
+
+            {/* Where a dragged block will land. */}
+            {dropSlot !== null && (
+              <div
+                className="pointer-events-none absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-indigo-400"
+                style={{ left: (starts[dropSlot] ?? totalTicks) * CELL }}
+              />
+            )}
 
             <button
               onClick={onAddFrame}
