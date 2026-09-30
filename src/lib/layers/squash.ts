@@ -20,11 +20,28 @@ import { getCachedBitmap } from "./flatten";
 
 export type SquashAnchor = "bottom" | "center" | "top";
 
-/** Height ÷ width factor, relative to the layer's own proportions: 1 = as
- *  drawn, >1 stretched, <1 squashed. */
+/**
+ * Which of the layer's own axes is nearer the canvas vertical, and which way
+ * along it is down (+1 / −1). A pose has no shear, so squashing straight down
+ * is only exact along the layer's own axes: the nearer one is used, so a
+ * drawing turned past 45° (lying down, upside down, flipped) still squashes
+ * toward the ground and lands on the edge that faces it.
+ */
+function verticalAxis(pose: Pose): { axis: "x" | "y"; down: 1 | -1 } {
+  const r = (pose.rotation * Math.PI) / 180;
+  const x = Math.sign(pose.scale.x || 1) * Math.sin(r); // how much local +x points down
+  const y = Math.sign(pose.scale.y || 1) * Math.cos(r); // how much local +y points down
+  return Math.abs(y) >= Math.abs(x)
+    ? { axis: "y", down: y >= 0 ? 1 : -1 }
+    : { axis: "x", down: x >= 0 ? 1 : -1 };
+}
+
+/** Height ÷ width factor (along the axis nearest vertical), relative to the
+ *  layer's own proportions: 1 = as drawn, >1 stretched, <1 squashed. */
 export function stretchOf(pose: Pose): number {
   const sx = Math.abs(pose.scale.x), sy = Math.abs(pose.scale.y);
-  return sx > 0 && sy > 0 ? Math.sqrt(sy / sx) : 1;
+  if (!(sx > 0 && sy > 0)) return 1;
+  return verticalAxis(pose).axis === "y" ? Math.sqrt(sy / sx) : Math.sqrt(sx / sy);
 }
 
 /** Slider value (−100..100, % taller or wider) ⇄ stretch factor. */
@@ -94,10 +111,14 @@ export function squashAnchorPoint(layer: Layer, anchor: SquashAnchor): Vec2 {
   const parts = [layer.image ? drawnBounds(layer.image) : null, strokeBounds(layer)];
   const drawn = rectIntersect(rectUnionAll(parts.filter((r): r is Rect => !!r)), box);
   const r = rectIsEmpty(drawn) ? box : drawn;
-  return {
-    x: r.x + r.w / 2,
-    y: anchor === "bottom" ? r.y + r.h : anchor === "top" ? r.y : r.y + r.h / 2,
-  };
+  const mid = { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+  if (anchor === "center") return mid;
+  // The edge that faces the ground ("bottom") or the sky ("top") on the canvas.
+  const { axis, down } = verticalAxis(layer.pose);
+  const far = (anchor === "bottom" ? down : -down) > 0;
+  return axis === "y"
+    ? { x: mid.x, y: far ? r.y + r.h : r.y }
+    : { x: far ? r.x + r.w : r.x, y: mid.y };
 }
 
 /** The layer's pose squashed or stretched to factor `k`, area preserved,
@@ -107,9 +128,11 @@ export function squashPose(layer: Layer, k: number, local: Vec2): Pose {
   const sx = pose.scale.x, sy = pose.scale.y;
   const area = Math.sqrt(Math.abs(sx * sy));
   const kk = Math.max(0.2, Math.min(5, k));
+  // Taller along the layer's axis nearest vertical, narrower across it.
+  const [fx, fy] = verticalAxis(pose).axis === "y" ? [1 / kk, kk] : [kk, 1 / kk];
   const next = makePose({
     ...pose,
-    scale: { x: Math.sign(sx || 1) * (area / kk), y: Math.sign(sy || 1) * (area * kk) },
+    scale: { x: Math.sign(sx || 1) * area * fx, y: Math.sign(sy || 1) * area * fy },
   });
 
   const before = matApply(layerMatrix(layer), local);
@@ -172,3 +195,33 @@ export const hopAt = (t: number): number => {
 /** Hop (canvas px, up) at bounce phase `t`; the landing frame (0) is on the ground. */
 export const hopAmount = (t: number, height: number): number =>
   Math.round(hopAt(t) * height * 10) / 10;
+
+/**
+ * How far down (canvas px) a stretch to `k` sits when it grows from the
+ * middle of the drawing instead of from its feet: from the feet it grows only
+ * upward, from the middle half up and half down. Measured from the drawing as
+ * drawn (k = 1), so an earlier squash does not change it.
+ */
+export function midStretchDrop(layer: Layer, k: number): number {
+  const feet = squashAnchorPoint(layer, "bottom");
+  const mid = squashAnchorPoint(layer, "center");
+  const rest = { ...layer, pose: squashPose(layer, 1, feet) };
+  const stretched = { ...rest, pose: squashPose(rest, k, feet) };
+  return matApply(layerMatrix(rest), mid).y - matApply(layerMatrix(stretched), mid).y;
+}
+
+/**
+ * Hop (canvas px, up) for a bounce frame squashed from the feet. In the air a
+ * stretch grows from the middle, as in classic animation, so the frame is
+ * lowered by midStretchDrop, but never below the ground: the frames beside the
+ * landing stretch up from the feet. The landing frame stays on the ground.
+ *
+ * Done through the hop (which each bounce replaces) rather than a different
+ * squash anchor, so bouncing again never drifts the drawing.
+ */
+export function bounceLift(layer: Layer, t: number, strength: number, height: number): number {
+  if (t < 1e-9 || t > 1 - 1e-9) return 0;
+  const k = amountToStretch(bounceAmount(t, strength));
+  const lift = hopAt(t) * height - midStretchDrop(layer, k);
+  return Math.round(Math.max(0, lift) * 10) / 10;
+}

@@ -58,6 +58,7 @@ import {
   amountToStretch,
   bounceAmount,
   bouncePhases,
+  bounceLift,
   hopAmount,
   squashAnchorPoint,
   type SquashAnchor,
@@ -1222,7 +1223,8 @@ const frames = activeProject?.frames.length
         return layerReducer(squashed, {
           type: "xf/hop",
           id: target.id,
-          height: hopAmount(phases[i], hop),
+          // From the feet, the stretch in the air grows from the middle (bounceLift).
+          height: anchor === "bottom" ? bounceLift(target, phases[i], strength, hop) : hopAmount(phases[i], hop),
         });
       }),
     }));
