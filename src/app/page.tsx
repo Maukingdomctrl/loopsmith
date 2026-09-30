@@ -133,6 +133,8 @@ export default function Home() {
   const [onionSkin, setOnionSkin] = useState(true);
   /** How many frames the onion skin shows before / after the current one (view only). */
   const [onionRange, setOnionRange] = useState({ before: 1, after: 1 });
+  /** Loop playback: the selected range (2+ frames) or everything. Off = play once and stop. */
+  const [loop, setLoop] = useState(true);
   const [showProjects, setShowProjects] = useState(false);
 
  
@@ -527,13 +529,22 @@ const frames = activeProject?.frames.length
     [frames]
   );
 
+  // Frames playback may visit: the selected range when looping 2+ selected frames, else all.
+  let playFrom = 0;
+  let playTo = frames.length - 1;
+  if (loop && selection.length > 1) {
+    const picked = selection.map((id) => frames.findIndex((f) => f.id === id));
+    playFrom = Math.min(...picked);
+    playTo = Math.max(...picked);
+  }
+
   useEffect(() => {
     if (!isPlaying) return;
 
     const sequence: number[] = [];
 
     frames.forEach((frame, index) => {
-      if (!frame.image) return;
+      if (!frame.image || index < playFrom || index > playTo) return;
 
       const hold = Math.max(1, frame.duration || 1);
       for (let i = 0; i < hold; i++) sequence.push(index);
@@ -545,9 +556,11 @@ const frames = activeProject?.frames.length
     let lastTime = performance.now();
     let position = 0;
 
-    // Smooth resume: check if the previous frame is still valid in our new sequence
+    // Smooth resume: check if the previous frame is still valid in our new sequence.
+    // Playing once from the last frame starts again from the beginning.
     setPreviewFrame((prev) => {
       position = sequence.includes(prev) ? sequence.indexOf(prev) : 0;
+      if (!loop && prev === sequence[sequence.length - 1]) position = 0;
       return sequence[position];
     });
 
@@ -555,6 +568,13 @@ const frames = activeProject?.frames.length
 
     const animate = (time: number) => {
       if (time - lastTime >= frameDuration) {
+        if (!loop && position === sequence.length - 1) {
+          // Played once: stop on the last frame.
+          setIsPlaying(false);
+          setActiveFrame(sequence[position]);
+          setEditingIndex(sequence[position]);
+          return;
+        }
         position = (position + 1) % sequence.length;
         setPreviewFrame(sequence[position]);
         lastTime += frameDuration;
@@ -564,7 +584,7 @@ const frames = activeProject?.frames.length
 
     animationId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationId);
-  }, [isPlaying, fps, durationSignature]);
+  }, [isPlaying, fps, durationSignature, loop, playFrom, playTo]);
 
   // ---------- Helpers (Centralized Pauses) ----------
 
@@ -755,13 +775,14 @@ const frames = activeProject?.frames.length
   /** Play / stop. Stopping leaves the current frame where playback was, as in Animate. */
   const togglePlay = useCallback(() => {
     if (!isPlaying) {
+      setPreviewFrame(activeFrame); // play from the playhead
       setIsPlaying(true);
       return;
     }
     setIsPlaying(false);
     setActiveFrame(previewFrame);
     setEditingIndex(previewFrame);
-  }, [isPlaying, previewFrame]);
+  }, [isPlaying, previewFrame, activeFrame]);
 
   const handleHistoryCommit = useCallback(() => {
     const project = projectsRef.current.find((p) => p.id === activeProjectId);
@@ -1639,6 +1660,9 @@ const deleteProject = useCallback(
         selectedIds={selection}
         onSelectionChange={setSelectedIds}
         onion={onionSkin ? onionRange : undefined}
+        fps={fps}
+        loop={loop}
+        onLoopChange={setLoop}
         onOnionChange={setOnionRange}
         background={background}
         activeFrame={activeFrame}

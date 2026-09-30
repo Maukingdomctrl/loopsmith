@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Copy, Eraser, Trash2 } from "lucide-react";
+import { Plus, Copy, Eraser, Trash2, Repeat } from "lucide-react";
 import type { CanvasBackground } from "@/types/layer";
 
 /** Width of one tick (1/fps s) on the timeline, in px. */
@@ -25,6 +25,9 @@ interface TimelineProps {
   /** Onion-skin frames before / after the current one; undefined while onion skin is off. */
   onion?: { before: number; after: number };
   onOnionChange: (onion: { before: number; after: number }) => void;
+  fps: number;
+  loop: boolean;
+  onLoopChange: (loop: boolean) => void;
   activeFrame: number;
   /** Where the playhead is: the frame on the canvas (the playing one during playback). */
   currentFrame: number;
@@ -51,6 +54,9 @@ export default function Timeline({
   onSelectionChange,
   onion,
   onOnionChange,
+  fps,
+  loop,
+  onLoopChange,
   activeFrame,
   currentFrame,
   onFrameSelect,
@@ -236,9 +242,19 @@ export default function Timeline({
       }}
     >
       <div className="mb-1 flex h-7 shrink-0 items-center justify-between">
-        <p className="text-sm text-zinc-400">
-          Timeline ({frames.length} frames) · Frame {currentFrame + 1}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-zinc-400">Timeline ({frames.length} frames)</p>
+          <button
+            onClick={() => onLoopChange(!loop)}
+            aria-pressed={loop}
+            title={loop ? "Loop is on: plays the selected frames (or all) again and again" : "Loop is off: plays once and stops"}
+            className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs ${
+              loop ? "bg-indigo-500/20 text-indigo-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-white"
+            }`}
+          >
+            <Repeat size={14} /> Loop
+          </button>
+        </div>
 
         <div className="flex items-center gap-1">
           <button onClick={onDuplicate} className={actionClass} title="Duplicate this frame">
@@ -254,6 +270,13 @@ export default function Timeline({
           >
             <Trash2 size={14} /> Delete
           </button>
+          {/* Fixed width, so nothing shifts as the numbers change. */}
+          <p
+            title="Current frame · time · speed"
+            className="ml-3 w-44 whitespace-nowrap text-right text-xs tabular-nums text-zinc-400"
+          >
+            Frame {currentFrame + 1} · {((playheadTick + 1) / fps).toFixed(2)}s · {fps} fps
+          </p>
         </div>
       </div>
 
