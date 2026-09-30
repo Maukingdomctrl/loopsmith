@@ -476,6 +476,7 @@ const frames = activeProject?.frames.length
   const background = activeProject?.background ?? DEFAULT_BACKGROUND;
 
   const timelineFrames = useMemo(() => frames.map((f) => f.image), [frames]);
+  const timelineDurations = useMemo(() => frames.map((f) => f.duration), [frames]);
 
   const stabilizationPresent = useMemo(
     () => hasStabilization(frames),
@@ -724,6 +725,17 @@ const frames = activeProject?.frames.length
     },
     [activeFrame]
   );
+
+  /** Play / stop. Stopping leaves the current frame where playback was, as in Animate. */
+  const togglePlay = useCallback(() => {
+    if (!isPlaying) {
+      setIsPlaying(true);
+      return;
+    }
+    setIsPlaying(false);
+    setActiveFrame(previewFrame);
+    setEditingIndex(previewFrame);
+  }, [isPlaying, previewFrame]);
 
   const handleHistoryCommit = useCallback(() => {
     const project = projectsRef.current.find((p) => p.id === activeProjectId);
@@ -1295,7 +1307,7 @@ const deleteProject = useCallback(
       <Toolbar
         isPlaying={isPlaying}
         saveStatus={saveStatus}
-        onPlay={() => setIsPlaying((v) => !v)}
+        onPlay={togglePlay}
         onUndo={undo}
         onRedo={redo}
         onImport={() =>
@@ -1478,8 +1490,10 @@ const deleteProject = useCallback(
 
       <Timeline
         frames={timelineFrames}
+        durations={timelineDurations}
         background={background}
         activeFrame={activeFrame}
+        currentFrame={currentIndex}
         onFrameSelect={selectFrame}
         onReorder={(from, to) => {
           const insertAt = from < to ? to - 1 : to;
