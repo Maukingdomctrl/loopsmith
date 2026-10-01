@@ -28,7 +28,7 @@ import { paperField } from "../paper";
 
 /* ---------- materials ---------- */
 
-interface HardMaterial {
+export interface HardMaterial {
   /** Pressure → fraction of the full width. */
   readonly width: PressureCurve;
   /** Pressure → opacity of the ink. Graphite thins out under a light hand. */
@@ -37,12 +37,12 @@ interface HardMaterial {
   readonly grain: number;
 }
 
-const MATERIALS: Record<string, HardMaterial> = {
+export const MATERIALS: Record<string, HardMaterial> = {
   // even and clean: width follows pressure closely and linearly, from a hairline
   // at a whisper to full width; a light touch is also a lighter line
   pen: {
-    width: { from: 0.02, to: 1, gamma: 1.25 },
-    opacity: { from: 0.06, to: 1, gamma: 1.1 },
+    width: { from: 0.02, to: 1, gamma: 1.8, ease: 0.4 },
+    opacity: { from: 0.05, to: 1, gamma: 1.7 },
     grain: 0,
   },
   // sharp graphite: pressure changes width AND how much lead is laid down
@@ -242,7 +242,7 @@ export class HardModel implements BrushModel {
  * peaks, a firm one fills the valleys. Fully pressed (a = 1) every pixel
  * survives, so the hard edge of a heavy line stays clean.
  */
-function grainedInk(a: number, tooth: number, grain: number): number {
+export function grainedInk(a: number, tooth: number, grain: number): number {
   const lo = 1 - 1.3 * a - 0.1;
   const contact = smoothstep(lo, lo + 0.4, tooth);
   const keep = 1 - grain + grain * contact * 1.25;

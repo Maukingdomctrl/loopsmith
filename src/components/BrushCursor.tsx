@@ -12,7 +12,7 @@
  * swallow the very events the tools need.
  */
 
-import { useMemo } from "react";
+import { useMemo, type Ref } from "react";
 import type { Vec2 } from "@/types/geometry";
 import type { BrushCursorShape } from "@/types/raster";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
@@ -32,6 +32,9 @@ interface Props {
   /** Pencil lead colour — the current paint colour. */
   color?: string;
   visible?: boolean;
+  /** The positioning group, so a drawing tool can move the cursor directly
+   *  (without a React render) on every pen sample. */
+  positionRef?: Ref<SVGGElement>;
 }
 
 
@@ -43,6 +46,7 @@ export default function BrushCursor({
   erasing = false,
   color = "#000000",
   visible = true,
+  positionRef,
 }: Props) {
   const geometry = useMemo(() => {
     if (!position) return null;
@@ -72,7 +76,8 @@ export default function BrushCursor({
       className="pointer-events-none absolute inset-0 z-[90]"
       aria-hidden
     >
-      <g transform={`translate(${position.x} ${position.y}) rotate(${angle})`}>
+      <g ref={positionRef} transform={`translate(${position.x} ${position.y})`}>
+      <g transform={`rotate(${angle})`}>
         {/* Held at 45°, with the tip exactly on the pointer. */}
         <g transform="rotate(-45)" stroke={shadow} strokeWidth={0.75} strokeLinejoin="round">
           {erasing ? (
@@ -95,6 +100,7 @@ export default function BrushCursor({
             </>
           )}
         </g>
+      </g>
       </g>
     </svg>
   );
