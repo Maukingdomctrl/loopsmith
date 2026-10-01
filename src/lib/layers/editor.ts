@@ -70,6 +70,7 @@ import {
 import { attachLayerSize, syncBaseFromLegacy } from "./migrate";
 import { defaultFitPose } from "./layerSpace";
 import { makePose } from "@/lib/geometry/pose";
+import { squashPose } from "./squash";
 import { pruneSelection, selectOnly } from "./selection";
 
 export type LayerAction =
@@ -115,6 +116,11 @@ export type LayerAction =
   | { type: "xf/rotateDrag"; selection: LayerSelection; gesture: RotateGesture; pointer: Vec2; snap: boolean }
   | { type: "xf/scaleBy"; selection: LayerSelection; sx: number; sy: number; center?: Vec2 }
   | { type: "xf/scaleTo"; id: string; scale: Vec2 }
+  /** `anchor`: the layer-space point that stays put (see squashAnchorPoint). */
+  | { type: "xf/squash"; id: string; stretch: number; anchor: Vec2 }
+  /** Lift the layer `height` canvas px above where it rests (replaces any
+   *  earlier hop). */
+  | { type: "xf/hop"; id: string; height: number }
   | { type: "xf/zoomTo"; id: string; zoom: number; baseScale: number }
   | { type: "xf/scaleDrag"; gesture: ScaleGesture; pointer: Vec2; uniform: boolean; fromCenter: boolean }
   | { type: "xf/straighten"; selection: LayerSelection; a: Vec2; b: Vec2; axis: "horizontal" | "vertical" }
@@ -279,6 +285,22 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
       next = scaleSelectionBy(layers, action.selection, action.sx, action.sy, action.center);
       break;
     case "xf/scaleTo": next = setLayerScale(layers, action.id, action.scale); break;
+    case "xf/hop": {
+      const l = findLayer(layers, action.id);
+      if (!l || l.locked) break;
+      const delta = action.height - (l.hop ?? 0);
+      if (delta === 0) break;
+      next = updateLayer(layers, l.id, {
+        pose: makePose({ ...l.pose, position: { x: l.pose.position.x, y: l.pose.position.y - delta } }),
+        hop: action.height || undefined,
+      });
+      break;
+    }
+    case "xf/squash": {
+      const l = findLayer(layers, action.id);
+      if (l && !l.locked) next = updateLayer(layers, l.id, { pose: squashPose(l, action.stretch, action.anchor) });
+      break;
+    }
     case "xf/zoomTo":  next = setLayerZoom(layers, action.id, action.zoom, action.baseScale); break;
     case "xf/scaleDrag":
       next = updateScale(layers, action.gesture, action.pointer, {

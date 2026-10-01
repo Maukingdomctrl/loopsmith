@@ -49,8 +49,3 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 - Every paint edit is one undo step (`onHistoryCommit`) and sets `flattenKey: null`.
 - Background is document state (`CanvasBackground`); checkerboard is view-only and never exported.
 - Page layout is a fixed flex frame (Toolbar / sidebars / Canvas / Timeline). Nothing should shift size.
-
-## Known leftovers (safe to delete when tidying)
-`LeftSidebar.tsx`, `EmojiLibrary.tsx`, `lib/templateRegistry.ts`, `lib/createTemplateProject.ts`,
-`lib/geometryPresets.ts`, `src/templates/**`, `components/editor/panels/TransparencyPanel.tsx`,
-the old `frame.transparency` mask path, `tree.txt`, `tsconfig.tsbuildinfo`.

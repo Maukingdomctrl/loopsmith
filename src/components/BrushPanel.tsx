@@ -20,11 +20,13 @@ import {
   renderBrushPreview,
   type PreviewKind,
 } from "@/lib/raster/brushes/preview";
-import type {
-  BrushId,
-  BrushPrefs,
-  BrushSpec,
+import {
+  BRUSH_MODES,
+  type BrushId,
+  type BrushPrefs,
+  type BrushSpec,
 } from "@/lib/raster/brushes/types";
+import { BLEND_LABELS, type BlendMode } from "@/types/layer";
 import { parseHex } from "@/lib/raster/color";
 
 /** Preview pixel density: drawn at 2× and shown at 1× so it stays crisp. */
@@ -264,6 +266,18 @@ export default function BrushPanel({
           format={(v) => `${v}%`}
           onChange={(v) => onChange(spec.id, { intensity: v / 100 })}
         />
+        <label className="flex items-center gap-2 text-xs">
+          <span className="w-[58px] shrink-0 text-zinc-300">Mode</span>
+          <select
+            value={p.mode ?? "normal"}
+            onChange={(e) => onChange(spec.id, { mode: e.target.value as BlendMode })}
+            className="min-w-0 flex-1 rounded bg-zinc-800 px-1 py-1 text-xs text-white outline-none"
+          >
+            {BRUSH_MODES.map((m) => (
+              <option key={m} value={m}>{BLEND_LABELS[m]}</option>
+            ))}
+          </select>
+        </label>
         {spec.hasAngle && (
           <Slider
             label="Angle"

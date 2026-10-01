@@ -105,7 +105,8 @@ interface CanvasProps {
   editFrame: Frame;
   isPlaying: boolean;
 
-  previousFrame: Frame | null;
+  /** Neighbours to onion-skin: offset < 0 is before the current frame, > 0 after. */
+  onionFrames: { frame: Frame; offset: number }[];
   onionSkin: boolean;
 
   view: CanvasView;
@@ -134,11 +135,8 @@ interface CanvasProps {
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 8;
 const SAVE_DEBOUNCE_MS = 500;
-/**
- * Size of a fresh drawing sheet on an empty frame. Shown at the same size on
- * screen as before, but with twice the pixels so brush lines stay clean when zoomed.
- */
-const BLANK_SIZE = 1024;
+/** Size of a fresh drawing sheet on an empty frame. */
+const BLANK_SIZE = 512;
 /** Pressure used for a mouse, which reports none. */
 const MOUSE_PRESSURE = 0.62;
 
@@ -178,6 +176,10 @@ const ONION_BACKGROUND: CanvasBackground = {
   checkerboard: false,
 };
 
+/** Onion tints, as in Animate: frames before are red-ish, frames after green-ish. View only. */
+const ONION_BEFORE = "rgb(255, 70, 70)";
+const ONION_AFTER = "rgb(40, 200, 90)";
+
 export default function Canvas({
   projectId,
   containerRef,
@@ -187,7 +189,7 @@ export default function Canvas({
   frame,
   editFrame,
   isPlaying,
-  previousFrame,
+  onionFrames,
   onionSkin,
   view,
   onViewChange,
@@ -211,8 +213,7 @@ export default function Canvas({
    * Backing pixels of the main canvas: the 512 canvas at the screen's real
    * resolution, and at least 2×. The browser scales it smoothly onto the
    * screen (Windows display scaling, half-pixel positions), so edges stay
-   * clean instead of stair-stepped. The old transparency mask is a 512 grid,
-   * so it keeps the canvas at 512.
+   * clean instead of stair-stepped.
    */
   const [screenDpr, setScreenDpr] = useState(1);
   useEffect(() => {
@@ -221,10 +222,12 @@ export default function Canvas({
     window.addEventListener("resize", read);
     return () => window.removeEventListener("resize", read);
   }, []);
-  const viewPx = frame.transparency ? CANVAS_SIZE : Math.round(CANVAS_SIZE * Math.max(2, screenDpr));
+  const viewPx = Math.round(CANVAS_SIZE * Math.max(2, screenDpr));
   const viewPxRef = useRef(viewPx);
   viewPxRef.current = viewPx;
   const onionCanvasRef = useRef<HTMLCanvasElement>(null);
+  /** Scratch surface where each onion frame is drawn and tinted. */
+  const onionScratch = useRef<HTMLCanvasElement | null>(null);
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null);
 
   /** Local alias so existing coordinate helpers keep reading naturally. */
@@ -407,7 +410,9 @@ const commit = useCallback((next: Frame) => {
   const brushNow = brushPrefs[brushId];
   const brushSpecNow = brushSpec(brushId);
   /** Hard Linework records stroke physics (drawn fresh at every zoom), not pixels. */
-  const brushIsVector = brushSpecNow.model === "hard" && !maskMode;
+  // Blend modes (Multiply…) are a pixel-engine feature: a non-normal mode uses it.
+  const brushIsVector =
+    brushSpecNow.model === "hard" && !maskMode && (!brushNow.mode || brushNow.mode === "normal");
   const brushPanelVisible = brushPanelOpen && activeTool === "brush";
   /** The radius the cursor and the size bar show: the brush's own, or the eraser's. */
   const brushPanelVisibleRef = useRef(false);
@@ -495,11 +500,7 @@ const commit = useCallback((next: Frame) => {
     if (paintLayer.adjust) return;
 
     if (!paintLayer.image && !paintLayer.strokes?.length) {
-      // Match the previous frame's sheet when it has artwork: auto stabilize
-      // needs every frame the same size.
-      const prev = previousFrame?.layers.find((l) => l.image || l.strokes?.length);
-      const w = prev ? Math.round(prev.size.w) : BLANK_SIZE;
-      const h = prev ? Math.round(prev.size.h) : BLANK_SIZE;
+      const w = BLANK_SIZE, h = BLANK_SIZE;
       if (paintLayer.size.w !== w || paintLayer.size.h !== h) {
         const f = editRef.current;
         commit({
@@ -558,7 +559,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, paintLayer, commit, maskMode, previousFrame, brushIsVector]);
+  }, [activeTool, paintLayer, commit, maskMode, brushIsVector]);
 
   /** Canvas point → base-layer pixel (position, zoom, rotation and stabilize included). */
   const toLocal = useCallback((cx: number, cy: number) => {
@@ -869,6 +870,7 @@ const commit = useCallback((next: Frame) => {
         intensity: brushNow.intensity,
         material: brushNow.material,
         angle: (brushNow.angle * Math.PI) / 180,
+        blend: brushNow.mode,
         // a pen (or a stylus the browser calls "touch") has real pressure;
         // a mouse or finger gets the brush's own stand-in
         hasPressure: reportsPressure(e),
@@ -1212,7 +1214,7 @@ const commit = useCallback((next: Frame) => {
     let cancelled = false;
     const pending = [
       ...frame.layers,
-      ...(previousFrame?.layers ?? []),
+      ...onionFrames.flatMap((o) => o.frame.layers),
     ].filter((l) => (l.image || l.mask?.image) && l.visible);
 
     if (!pending.length) return;
@@ -1224,7 +1226,7 @@ const commit = useCallback((next: Frame) => {
     return () => {
       cancelled = true;
     };
-  }, [frame.layers, previousFrame?.layers]);
+  }, [frame.layers, onionFrames]);
 
   /**
    * Resolve any layer whose native size is still unknown.
@@ -1294,23 +1296,10 @@ const commit = useCallback((next: Frame) => {
     interactive: true,
     smoothing: true,
   });
-
-  // NEW — apply transparency mask
-  const mask = frame.transparency;
-  if (mask) {
-    const img = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-
-    for (let i = 0; i < mask.alpha.length; i++) {
-            img.data[i * 4 + 3] = Math.min(img.data[i * 4 + 3], mask.alpha[i]);
-    }
-
-    ctx.putImageData(img, 0, 0);
-  }
   }, [
       frame,
       frame.layers,
       frame.crop,
-      frame.transparency,
       viewPx,
       frame.stab?.dx,
       frame.stab?.dy,
@@ -1321,7 +1310,7 @@ const commit = useCallback((next: Frame) => {
     decodeGeneration,
   ]);
 
-  /* ---------- Onion skin (honours the previous frame's own transform) ---------- */
+  /* ---------- Onion skin (honours each neighbour's own transform) ---------- */
 
   useEffect(() => {
     const canvas = onionCanvasRef.current;
@@ -1333,15 +1322,40 @@ const commit = useCallback((next: Frame) => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-    if (!onionSkin || !previousFrame) return;
-    if (!previousFrame.layers.some((l) => (l.image || l.strokes?.length) && l.visible)) return;
+    if (!onionSkin || !onionFrames.length) return;
 
-    drawFrameLayers(ctx, previousFrame, CANVAS_SIZE, {
-      background: ONION_BACKGROUND,
-      resolve: domResolver(),
-      checkerboard: false,
-    });
-  }, [onionSkin, previousFrame, decodeGeneration]);
+    const scratch = (onionScratch.current ??= document.createElement("canvas"));
+    scratch.width = CANVAS_SIZE;
+    scratch.height = CANVAS_SIZE;
+    const sctx = scratch.getContext("2d");
+    if (!sctx) return;
+
+    // Farthest first, so nearer frames sit on top; each step away fades a little more.
+    const ordered = [...onionFrames].sort((a, b) => Math.abs(b.offset) - Math.abs(a.offset));
+    for (const { frame: neighbour, offset } of ordered) {
+      if (!neighbour.layers.some((l) => (l.image || l.strokes?.length) && l.visible)) continue;
+
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = "source-over";
+      sctx.globalAlpha = 1;
+      sctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      drawFrameLayers(sctx, neighbour, CANVAS_SIZE, {
+        background: ONION_BACKGROUND,
+        resolve: domResolver(),
+        checkerboard: false,
+      });
+
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = "source-atop";
+      sctx.globalAlpha = 0.65;
+      sctx.fillStyle = offset < 0 ? ONION_BEFORE : ONION_AFTER;
+      sctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+      ctx.globalAlpha = Math.max(0.25, 1 - (Math.abs(offset) - 1) * 0.18);
+      ctx.drawImage(scratch, 0, 0);
+    }
+    ctx.globalAlpha = 1;
+  }, [onionSkin, onionFrames, decodeGeneration]);
 
   /* ---------- Floating selection layer ---------- */
 

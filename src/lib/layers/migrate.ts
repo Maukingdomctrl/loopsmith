@@ -157,9 +157,6 @@ export function migrateFrame(raw: LegacyFrame): Frame {
     layers: [withPose],
     activeLayerId: withPose.id,
     crop: null,
-
-     transparency: null,
-
     flattenKey: null,
     flattenedAt: 0,
     /** Set once the base bitmap decodes; until then the legacy fields are the
@@ -292,10 +289,6 @@ export function normalizeFrameLayers(frame: Frame): Frame {
     layers: withBase,
     activeLayerId,
     crop: frame.crop ?? null,
-
-    // NEW
-    transparency: frame.transparency ?? null,
-
     stab: frame.stab ?? ZERO_STABILIZATION,
     flattenKey: frame.flattenKey ?? null,
     flattenedAt: frame.flattenedAt ?? 0,

@@ -28,12 +28,6 @@ export interface StabilizationOffset {
 
 export const ZERO_STABILIZATION: StabilizationOffset = { dx: 0, dy: 0 };
 
-export interface TransparencyMask {
-  width: number;
-  height: number;
-  alpha: Uint8ClampedArray;
-}
-
 export type Frame = {
   /** Stable identity. Never derive storage or history keys from array position. */
   id: string;
@@ -76,8 +70,6 @@ export type Frame = {
 
   /** Canvas-space document crop. null = full surface. */
   crop: DocumentCrop | null;
-
-  transparency: TransparencyMask | null;
 
   /** layerStateKey() of the layers `image` was composited from. */
   flattenKey: string | null;
