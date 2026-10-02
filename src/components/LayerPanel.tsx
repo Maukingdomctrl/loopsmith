@@ -10,13 +10,14 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, LockOpen, Plus, Copy, Trash2, ChevronDown, ChevronsRight, ArrowUp, ArrowDown, FolderPlus, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown, Contrast, X, Check } from "lucide-react";
+import { Eye, EyeOff, Lock, LockOpen, Plus, Copy, Trash2, ChevronDown, ChevronRight, ChevronsRight, Folder, FolderOpen, ArrowUp, ArrowDown, FolderPlus, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown, Contrast, X, Check } from "lucide-react";
 
 import type { Adjustment, AdjustmentType, BlendMode, ColorBalanceTone, Layer, LayerSelection } from "@/types/layer";
 import { ADJUSTMENT_LABELS, BLEND_LABELS, BLEND_MODES } from "@/types/layer";
 import type { LayerAction } from "@/lib/layers/editor";
 import { BLANK_LAYER_SIZE, MAX_LAYERS_PER_FRAME } from "@/lib/layers/constants";
 import { maskTone, rangeFill } from "@/styles/tokens";
+import { ancestorsOf } from "@/lib/layers/groups";
 
 interface Props {
   layers: readonly Layer[];
@@ -38,13 +39,15 @@ interface Props {
   onApplyMask?: (id: string) => void;
   /** Collapse the panel to its rail. */
   onCollapse?: () => void;
+  /** New empty group (on every frame). */
+  onAddGroup?: () => void;
 }
 
 const ADJUSTMENT_TYPES: readonly AdjustmentType[] = ["brightnessContrast", "hueSaturation", "colorBalance"];
 
 export default function LayerPanel({
   layers, selection, disabled, onSelect, dispatch, onAddImage, onAddBlankAllFrames,
-  onAddAdjustment, onBeginEdit, editMask = false, onEditMaskChange, onApplyMask, onCollapse,
+  onAddAdjustment, onBeginEdit, editMask = false, onEditMaskChange, onApplyMask, onCollapse, onAddGroup,
 }: Props) {
   const [addMenu, setAddMenu] = useState(false);
   // Reverse for display only. The index handed back to `moveLayer` is always
@@ -54,19 +57,24 @@ export default function LayerPanel({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
+  /** Where a dragged row would land: above a row, or into a group. */
+  const [dropAt, setDropAt] = useState<{ id: string; into: boolean } | null>(null);
   const handleDrop = useCallback(
-    (targetId: string) => {
+    (targetId: string, into: boolean) => {
       const from = dragFrom.current;
       dragFrom.current = null;
+      setDropAt(null);
       if (!from || from === targetId) return;
-      // Display row k maps to array index (len - 1 - k); the drop slot is
-      // "above the target", i.e. target index + 1 in array terms.
-      const targetIdx = layers.findIndex((l) => l.id === targetId);
-      if (targetIdx < 0) return;
-      dispatch({ type: "layer/move", id: from, to: targetIdx + 1 });
+      dispatch({ type: "layer/drop", id: from, targetId, into });
     },
-    [dispatch, layers]
+    [dispatch]
   );
+  /** Over the lower half of a group row, a drop goes into the group. */
+  const dropsInto = (e: React.DragEvent<HTMLElement>, layer: Layer) => {
+    if (layer.kind !== "group") return false;
+    const r = e.currentTarget.getBoundingClientRect();
+    return e.clientY > r.top + r.height / 2;
+  };
 
   const commitRename = useCallback(
     (id: string) => {
@@ -80,7 +88,10 @@ export default function LayerPanel({
   const primary = selection.primary;
   const primaryLayer = layers.find((l) => l.id === primary) ?? null;
   const full = layers.length >= MAX_LAYERS_PER_FRAME;
-  const stack = rows.filter((l) => l.kind !== "base");
+  // Rows top-first; layers inside a folded group are hidden.
+  const stack = rows.filter(
+    (l) => l.kind !== "base" && !ancestorsOf(layers, l).some((g) => g.collapsed)
+  );
   const base = rows.find((l) => l.kind === "base") ?? null;
 
   const setOpacity = (layer: Layer, value: number) => {
@@ -91,6 +102,15 @@ export default function LayerPanel({
   const renderRow = (layer: Layer) => {
     const isSelected = selection.ids.includes(layer.id);
     const isBase = layer.kind === "base";
+    const isGroup = layer.kind === "group";
+    const ancestors = ancestorsOf(layers, layer);
+    const depth = ancestors.length;
+    /** Hidden or locked by a group it sits in (its own switch may be on). */
+    const hiddenByGroup = ancestors.some((g) => !g.visible);
+    const lockedByGroup = ancestors.some((g) => g.locked);
+    const shown = layer.visible && !hiddenByGroup;
+    const childCount = isGroup ? layers.filter((l) => l.parentId === layer.id).length : 0;
+    const drop = dropAt?.id === layer.id ? dropAt : null;
     const opacity = Math.round(layer.opacity * 100);
     const details = [
       `${opacity}% opacity`,
@@ -104,8 +124,15 @@ export default function LayerPanel({
         key={layer.id}
         draggable={!isBase && !disabled}
         onDragStart={() => { dragFrom.current = layer.id; }}
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-        onDrop={(e) => { e.preventDefault(); handleDrop(layer.id); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          const into = dropsInto(e, layer);
+          if (drop?.into !== into) setDropAt({ id: layer.id, into });
+        }}
+        onDragLeave={() => { if (drop) setDropAt(null); }}
+        onDrop={(e) => { e.preventDefault(); handleDrop(layer.id, dropsInto(e, layer)); }}
+        onDragEnd={() => setDropAt(null)}
         onClick={(e) => {
           onSelect(
             layer.id,
@@ -113,20 +140,56 @@ export default function LayerPanel({
           );
           onEditMaskChange?.(false);
         }}
-        title={details}
-        className={`flex h-10 cursor-pointer items-center gap-2 rounded-ctrl pl-2 pr-1 ${
+        title={isGroup ? `${childCount} layer${childCount === 1 ? "" : "s"} · ${opacity}% opacity` : details}
+        className={`relative flex h-10 cursor-pointer items-center gap-2 rounded-ctrl pr-1 ${
           isSelected ? "selected" : "hoverable"
-        }`}
+        } ${drop?.into ? "ring-1 ring-inset ring-accent" : ""}`}
+        style={{ paddingLeft: 8 + depth * 11 }}
       >
+        {/* Where a dragged layer will land: a line above this row. */}
+        {drop && !drop.into && (
+          <span className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded-full bg-accent" />
+        )}
+        {/* One guide line per level of nesting. */}
+        {ancestors.map((_, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 w-px bg-track"
+            style={{ left: 8 + (depth - 1 - i) * 11 + 5 }}
+          />
+        ))}
+        {isGroup ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              dispatch({ type: "layer/collapse", id: layer.id, value: !layer.collapsed });
+            }}
+            aria-label={layer.collapsed ? `Open ${layer.name}` : `Fold ${layer.name}`}
+            aria-expanded={!layer.collapsed}
+            className="-ml-1 flex h-6 w-5 shrink-0 items-center justify-center rounded-[5px] text-icon hoverable"
+          >
+            <ChevronRight size={14} className={`transition-transform duration-150 ${layer.collapsed ? "" : "rotate-90"}`} />
+          </button>
+        ) : (
+          depth > 0 && <span className="-ml-1 w-5 shrink-0" />
+        )}
         {layer.clip && (
           <span title="Clipped to the layer below" className="-mr-1 text-ink-3">
             <CornerLeftDown size={12} />
           </span>
         )}
+        {isGroup ? (
+          layer.collapsed ? (
+            <Folder size={17} className={`shrink-0 text-icon-accent ${shown ? "" : "opacity-40"}`} />
+          ) : (
+            <FolderOpen size={17} className={`shrink-0 text-icon-accent ${shown ? "" : "opacity-40"}`} />
+          )
+        ) : (
         <div
           className={`flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-[6px] border bg-ctrl ${
             layer.mask && primary === layer.id && !editMask ? "border-select-line" : "border-line"
-          } ${layer.visible ? "" : "opacity-40"}`}
+          } ${shown ? "" : "opacity-40"}`}
         >
           {layer.adjust ? (
             <SlidersHorizontal size={13} className="text-icon" />
@@ -136,6 +199,7 @@ export default function LayerPanel({
             )
           )}
         </div>
+        )}
         {layer.mask && (
           <button
             onClick={(e) => {
@@ -192,9 +256,14 @@ export default function LayerPanel({
               }}
               className={`truncate text-[14px] ${
                 isSelected ? "font-semibold text-ink" : "font-medium text-ink"
-              } ${layer.visible ? "" : "text-ink-dim"}`}
+              } ${shown ? "" : "text-ink-dim"}`}
             >
               {layer.name}
+            </span>
+          )}
+          {isGroup && renamingId !== layer.id && (
+            <span className="shrink-0 rounded-[5px] bg-ctrl px-1.5 py-px font-mono text-[11px] text-ink-2">
+              {childCount}
             </span>
           )}
           {opacity < 100 && renamingId !== layer.id && (
@@ -213,7 +282,7 @@ export default function LayerPanel({
           title={layer.visible ? "Hide" : "Show"}
           aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-ctrl hoverable disabled:opacity-30 ${
-            layer.visible ? "text-icon" : "text-ink-dim"
+            layer.visible && !hiddenByGroup ? "text-icon" : "text-ink-dim"
           }`}
         >
           {layer.visible ? <Eye size={15} /> : <EyeOff size={15} />}
@@ -227,7 +296,7 @@ export default function LayerPanel({
           title={layer.locked ? "Unlock" : "Lock"}
           aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-ctrl hoverable disabled:opacity-30 ${
-            layer.locked ? "text-icon" : "text-ink-dim"
+            layer.locked || lockedByGroup ? "text-icon" : "text-ink-dim"
           }`}
         >
           {layer.locked ? <Lock size={14} /> : <LockOpen size={14} />}
@@ -240,6 +309,8 @@ export default function LayerPanel({
     ? ""
     : primaryLayer.kind === "base"
       ? "Base settings"
+      : primaryLayer.kind === "group"
+        ? "Group settings"
       : primaryLayer.adjust
         ? `${ADJUSTMENT_LABELS[primaryLayer.adjust.type]} settings`
         : "Layer settings";
@@ -318,14 +389,26 @@ export default function LayerPanel({
             </>
           )}
         </div>
-        <button
-          disabled
-          title="New group (layer groups aren't available yet)"
-          aria-label="New group (not available yet)"
-          className="flex h-8 w-8 items-center justify-center rounded-ctrl text-icon disabled:opacity-30"
-        >
-          <FolderPlus size={16} />
-        </button>
+        {(() => {
+          // With several layers picked, the folder button groups them;
+          // otherwise it makes a new, empty group.
+          const grouping = selection.ids.filter((id) => id !== base?.id).length >= 2;
+          return (
+            <button
+              onClick={() =>
+                grouping
+                  ? dispatch({ type: "layer/group", ids: selection.ids })
+                  : onAddGroup?.()
+              }
+              disabled={disabled || full || (!grouping && !onAddGroup)}
+              title={grouping ? "Group selected layers (Ctrl+G)" : "New group"}
+              aria-label={grouping ? "Group selected layers" : "New group"}
+              className="flex h-8 w-8 items-center justify-center rounded-ctrl text-icon hoverable disabled:opacity-30"
+            >
+              <FolderPlus size={16} />
+            </button>
+          );
+        })()}
         {onCollapse && (
           <>
             <span className="mx-1 h-5 w-px bg-line" />
@@ -406,7 +489,28 @@ export default function LayerPanel({
             />
           )}
 
-          {!primaryLayer.adjust && (
+          {primaryLayer.kind === "group" && (
+            <>
+              <div
+                className="flex h-10 items-center rounded-ctrl border border-line bg-panel px-3"
+                title="Each layer in the group keeps its own blend mode"
+              >
+                <span className="flex-1 text-[14px] text-ink-2">Blend</span>
+                <span className="text-[14px] font-semibold text-ink">Pass through</span>
+              </div>
+              <button
+                onClick={() => dispatch({ type: "layer/ungroup", id: primaryLayer.id })}
+                disabled={disabled}
+                title="Ungroup (Ctrl+Shift+G): keep the layers, remove the folder"
+                className={`${tile} w-full`}
+              >
+                <FolderOpen size={14} />
+                Ungroup
+              </button>
+            </>
+          )}
+
+          {!primaryLayer.adjust && primaryLayer.kind !== "group" && (
             <label className="relative flex h-10 items-center rounded-ctrl border border-line bg-panel px-3 hoverable">
               <span className="flex-1 text-[14px] text-ink-2">Blend</span>
               <select
@@ -431,6 +535,7 @@ export default function LayerPanel({
             </label>
           )}
 
+          {primaryLayer.kind !== "group" && (
           <div className="grid grid-cols-2 gap-2">
             {!primaryLayer.adjust && (
               <button
@@ -524,6 +629,7 @@ export default function LayerPanel({
               </button>
             )}
           </div>
+          )}
 
           <div className="grid grid-cols-4 gap-2">
             <button

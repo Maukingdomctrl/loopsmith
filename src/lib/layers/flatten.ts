@@ -36,6 +36,9 @@ export function layerStateKey(layers: readonly Layer[]): string {
         ? `${l.strokes.length}:${l.strokes[0].id}:${l.strokes[l.strokes.length - 1].id}`
         : "-",
       l.visible ? "1" : "0",
+      // The group it sits in decides whether a hidden group hides it. Only
+      // added when present, so keys of frames without groups are unchanged.
+      ...(l.parentId ? [`g:${l.parentId}`] : []),
       roundTo(l.opacity, 4).toString(),
       l.blend,
       l.clip ? "c" : "-",

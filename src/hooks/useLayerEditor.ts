@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Rect, Vec2 } from "@/types/geometry";
 import type { Frame } from "@/types/frame";
 import type { Layer, LayerSelection } from "@/types/layer";
-import { EMPTY_SELECTION } from "@/types/layer";
+import { EMPTY_SELECTION, isLockedIn } from "@/types/layer";
 
 import {
   isUndoable,
@@ -50,7 +50,9 @@ import {
   selectionBounds,
   selectionPivotCanvas,
   transformableLayers,
+  isCoveredBySelection,
 } from "@/lib/layers/selection";
+import { ancestorsOf } from "@/lib/layers/groups";
 import {
   layerContentBox,
   layerMatrix,
@@ -270,6 +272,8 @@ const dispatch = useCallback(
       const p = screenToCanvas(screen, getBounds(), viewRef.current);
       return pickTopmost(f.layers, (layer) => {
         if (!layer.visible || !(layer.image || layer.strokes?.length)) return false;
+        // Inside a hidden group: not on screen, so not pickable.
+        if (ancestorsOf(f.layers, layer).some((g) => !g.visible)) return false;
         const alphaAt = alphaFor?.(layer) ?? undefined;
         return (
           hitTestLayerBox(layerMatrix(layer), layerContentBox(layer), p, {
@@ -324,7 +328,7 @@ const dispatch = useCallback(
       const primary = primaryLayer(frameRef.current.layers, sel);
 
       /* ---- handles of the current selection take priority over picking ---- */
-      if (tool === "transform" && primary && !primary.locked) {
+      if (tool === "transform" && primary && !isLockedIn(frameRef.current.layers, primary)) {
         const hit = hitTestHandles(
           layerMatrix(primary),
           layerContentBox(primary),
@@ -368,10 +372,11 @@ const dispatch = useCallback(
       }
 
       const mode = e.shiftKey ? "range" : e.metaKey || e.ctrlKey ? "toggle" : "replace";
-      const alreadySelected = sel.ids.includes(picked.id);
+      // Clicking a layer inside a selected group drags the whole group.
+      const alreadySelected = isCoveredBySelection(frameRef.current.layers, sel, picked.id);
       if (!alreadySelected || mode !== "replace") select(picked.id, mode);
 
-      if (picked.locked) return true; // selectable, not movable
+      if (isLockedIn(frameRef.current.layers, picked)) return true; // selectable, not movable
 
       gesture.current = { kind: "move", startScreen: screen, lastCanvas: canvas };
       setActiveHandle("body");
@@ -559,7 +564,7 @@ const dispatch = useCallback(
       if ((e.key === "Delete" || e.key === "Backspace") && sel.primary) {
         const layer = findLayer(frameRef.current.layers, sel.primary);
         // The base layer is permanent; Delete on it is a no-op by contract.
-        if (layer && layer.kind !== "base" && !layer.locked) {
+        if (layer && layer.kind !== "base" && !isLockedIn(frameRef.current.layers, layer)) {
           e.preventDefault();
           onBeginHistory();
           historyOpened.current = true;

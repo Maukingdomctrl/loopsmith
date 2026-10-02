@@ -24,6 +24,7 @@ import { CANVAS_SIZE } from "@/lib/frameTransform";
 import { matSetTransform, matChain, matScale, matInvert } from "@/lib/geometry/mat2d";
 import { rectIsEmpty, rectNormalize } from "@/lib/geometry/rect";
 import { layerContentBox, layerMatrix } from "./layerSpace";
+import { resolveGroups } from "./groups";
 import type { Mat2D } from "@/types/geometry";
 import type { PencilStroke } from "@/lib/pencil/types";
 import { renderStrokes, strokesBounds } from "@/lib/pencil/render";
@@ -123,10 +124,13 @@ function createSurface(size: number): {
  */
 export function compositeLayers(
   ctx: Surface2D,
-  layers: readonly Layer[],
+  stack: readonly Layer[],
   resolve: BitmapResolver,
   options: CompositeOptions
 ): void {
+  // Groups pass through: drawn as a flat stack with each group's visibility
+  // and opacity folded into its layers. Unchanged when there are no groups.
+  const layers = resolveGroups(stack);
   const { surface, background, crop } = options;
   const smoothing = options.smoothing ?? false;
 

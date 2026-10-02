@@ -13,7 +13,9 @@ import type { Rect, Vec2 } from "@/types/geometry";
 import type { Pose } from "@/lib/geometry/pose";
 import type { PencilStroke } from "@/lib/pencil/types";
 
-export type LayerKind = "base" | "raster";
+/** `group` is a folder in the layer list: no pixels of its own; its layers
+ *  sit directly below it and point at it through `parentId`. */
+export type LayerKind = "base" | "raster" | "group";
 
 /** Only modes with an exact Canvas2D globalCompositeOperation equivalent are
  *  offered, so what the editor shows is byte-identical to what GIF export
@@ -150,6 +152,13 @@ export interface Layer {
    *  instead of stacking on top. */
   readonly hop?: number;
 
+  /** The group this layer sits in (top level when absent). Never set on the
+   *  base layer. Groups pass blend modes through: a group's visibility, lock
+   *  and opacity apply to everything inside it. */
+  readonly parentId?: LayerId;
+  /** Group folded shut in the layer panel. */
+  readonly collapsed?: boolean;
+
   /** Pencil strokes, stored as recorded physics in layer space and drawn over
    *  `image` analytically at render time. Never baked unless a pixel tool
    *  (fill, lasso) needs pixels. */
@@ -195,6 +204,20 @@ export const EMPTY_SELECTION: LayerSelection = { primary: null, ids: [] };
 /* ---------------- guards ---------------- */
 
 export const isBaseLayer = (l: Layer): boolean => l.kind === "base";
+
+export const isGroupLayer = (l: Layer): boolean => l.kind === "group";
+
+/** Locked itself, or inside a locked group. */
+export function isLockedIn(layers: readonly Layer[], layer: Layer): boolean {
+  let cur: Layer | undefined = layer;
+  // Bounded walk: a corrupt document cannot loop forever.
+  for (let depth = 0; cur && depth <= layers.length; depth++) {
+    if (cur.locked) return true;
+    const parentId: LayerId | undefined = cur.parentId;
+    cur = parentId ? layers.find((l) => l.id === parentId) : undefined;
+  }
+  return false;
+}
 
 /** Editable ⇔ unlocked. Visibility deliberately does NOT block editing: the
  *  standard workflow of hiding a layer while nudging its neighbour requires

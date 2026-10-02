@@ -16,6 +16,7 @@ import type { Vec2 } from "@/types/geometry";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
 import { matApply } from "@/lib/geometry/mat2d";
 import { layerContentBox, layerMatrix } from "@/lib/layers/layerSpace";
+import { selectedLayers } from "@/lib/layers/selection";
 import { rectIsEmpty, rectToQuad } from "@/lib/geometry/rect";
 import { vLen, vSub } from "@/lib/geometry/vec2";
 import {
@@ -67,8 +68,9 @@ export default function TransformOverlay({
   // Faint outlines for the non-primary members of a multi-selection.
   const secondary = useMemo(
     () =>
-      layers
-        .filter((l) => selection.ids.includes(l.id) && l.id !== primary?.id)
+      // A selected group outlines every layer inside it.
+      selectedLayers(layers, selection)
+        .filter((l) => l.id !== primary?.id)
         .map((l) => {
           const box = layerContentBox(l);
           if (rectIsEmpty(box)) return null;
@@ -76,7 +78,7 @@ export default function TransformOverlay({
           return rectToQuad(box).map((p) => matApply(m, p)) as Vec2[];
         })
         .filter(Boolean) as Vec2[][],
-    [layers, selection.ids, primary?.id]
+    [layers, selection, primary?.id]
   );
 
   if (!visible) return null;

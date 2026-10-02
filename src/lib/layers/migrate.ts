@@ -255,7 +255,7 @@ export function normalizeFrameLayers(frame: Frame): Frame {
   const repaired = raw.map((l, i) => ({
     ...l,
     id: l.id ?? `l_recovered_${i}`,
-    kind: l.kind === "base" ? "base" : ("raster" as const),
+    kind: l.kind === "base" ? "base" : l.kind === "group" ? ("group" as const) : ("raster" as const),
     name: typeof l.name === "string" && l.name ? l.name : `Layer ${i + 1}`,
     size: {
       w: Math.max(0, finiteOr(l.size?.w, 0)),

@@ -76,7 +76,7 @@ import { clearTransforms } from "@/lib/frameTransform";
 /* ---------- layer system ---------- */
 
 import type { AdjustmentType, CanvasBackground, Layer } from "@/types/layer";
-import { ADJUSTMENT_LABELS, DEFAULT_BACKGROUND, defaultAdjustment } from "@/types/layer";
+import { ADJUSTMENT_LABELS, DEFAULT_BACKGROUND, defaultAdjustment, isLockedIn } from "@/types/layer";
 import { useLayerEditor } from "@/hooks/useLayerEditor";
 import {
   attachLayerSize,
@@ -776,6 +776,7 @@ const frames = activeProject?.frames.length
         return;
       }
 
+
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         if (!selectionActive) undo();
@@ -1147,7 +1148,141 @@ const frames = activeProject?.frames.length
    * frames (blend, alpha lock, clipping, opacity, adjustment) change every
    * copy. Toggles are one undo step each; slider drags one per drag.
    */
+  /** A new, empty group on every frame, linked like an adjustment layer, so
+   *  layers added on every frame can be put into it everywhere at once. */
+  const addGroupAllFrames = () => {
+    const name = `Group ${editFrame.layers.filter((l) => l.kind === "group").length + 1}`;
+    const linkId = createLayerId();
+    const anchor = editFrame.layers.find((l) => l.id === editFrame.activeLayerId);
+    updateProject((project) => ({
+      ...project,
+      frames: project.frames.map((f) => {
+        // Same spot on every frame: beside the twin of the layer picked here.
+        const twin = f.id === editFrame.id ? anchor : anchor?.linkId
+          ? f.layers.find((l) => l.linkId === anchor.linkId)
+          : undefined;
+        const at = twin ? { ...f, activeLayerId: twin.id } : f;
+        return layerReducer(at, { type: "layer/addGroup", name, linkId });
+      }),
+    }));
+  };
+
+  /**
+   * Group actions follow linked layers: grouping layers that exist on every
+   * frame groups them on every frame (one undo step), and so do ungrouping,
+   * dragging a linked layer into a linked group, and folding a linked group.
+   * Anything else stays on this frame.
+   */
+  const dispatchGroupAction = (
+    action: Extract<LayerAction, { type: "layer/group" | "layer/ungroup" | "layer/drop" | "layer/collapse" }>
+  ) => {
+    const find = (id: string) => editFrame.layers.find((l) => l.id === id);
+    // Structural edits are their own undo step, never merged with the panel
+    // edits before or after them.
+    const single = (a: LayerAction) => {
+      editor.endGesture();
+      editor.dispatch(a);
+      editor.endGesture();
+    };
+    const twinIn = (f: Frame, l: Layer | undefined) =>
+      !l ? undefined : f.id === editFrame.id ? f.layers.find((x) => x.id === l.id) : l.linkId ? f.layers.find((x) => x.linkId === l.linkId) : undefined;
+    const everyFrame = (fn: (f: Frame) => Frame, quiet = false) =>
+      (quiet ? updateProjectQuiet : updateProject)((project) => ({ ...project, frames: project.frames.map(fn) }));
+
+    switch (action.type) {
+      case "layer/group": {
+        const chosen = action.ids.map(find).filter((l): l is Layer => !!l && l.kind !== "base");
+        if (chosen.length === 0) return;
+        const name = action.name ?? `Group ${editFrame.layers.filter((l) => l.kind === "group").length + 1}`;
+        if (!chosen.every((l) => l.linkId)) {
+          single({ ...action, name });
+          return;
+        }
+        const linkId = createLayerId();
+        everyFrame((f) => {
+          const ids = chosen.map((l) => twinIn(f, l)?.id).filter((id): id is string => !!id);
+          return ids.length ? layerReducer(f, { type: "layer/group", ids, name, linkId }) : f;
+        });
+        return;
+      }
+      case "layer/ungroup": {
+        const group = find(action.id);
+        if (!group?.linkId) {
+          single(action);
+          return;
+        }
+        everyFrame((f) => {
+          const twin = twinIn(f, group);
+          return twin ? layerReducer(f, { type: "layer/ungroup", id: twin.id }) : f;
+        });
+        return;
+      }
+      case "layer/drop": {
+        const moving = find(action.id);
+        const target = find(action.targetId);
+        if (!moving?.linkId || !target?.linkId) {
+          single(action);
+          return;
+        }
+        everyFrame((f) => {
+          const m = twinIn(f, moving);
+          const t = twinIn(f, target);
+          return m && t ? layerReducer(f, { ...action, id: m.id, targetId: t.id }) : f;
+        });
+        return;
+      }
+      case "layer/collapse": {
+        const group = find(action.id);
+        if (!group?.linkId) {
+          editor.dispatch(action);
+          return;
+        }
+        everyFrame((f) => {
+          const twin = twinIn(f, group);
+          return twin ? layerReducer(f, { ...action, id: twin.id }) : f;
+        }, true);
+        return;
+      }
+    }
+  };
+
+  /** Ctrl+G groups the selected layers; Ctrl+Shift+G ungroups. */
+  const onGroupShortcut = (ungroup: boolean) => {
+    if (isPlaying || selectionActive) return;
+    if (ungroup) {
+      const primary = editor.primary;
+      if (primary?.kind === "group") dispatchGroupAction({ type: "layer/ungroup", id: primary.id });
+      return;
+    }
+    if (editor.selection.ids.length) dispatchGroupAction({ type: "layer/group", ids: editor.selection.ids });
+  };
+  /** Read through a ref so the key listener is added once. */
+  const groupShortcut = useRef(onGroupShortcut);
+  useEffect(() => {
+    groupShortcut.current = onGroupShortcut;
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "g") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "TEXTAREA" || el.isContentEditable ||
+        (el.tagName === "INPUT" && (el as HTMLInputElement).type !== "range"))) return;
+      e.preventDefault(); // not the browser's "find next"
+      groupShortcut.current(e.shiftKey);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const dispatchLayerPanel = (action: LayerAction) => {
+    if (
+      action.type === "layer/group" ||
+      action.type === "layer/ungroup" ||
+      action.type === "layer/drop" ||
+      action.type === "layer/collapse"
+    ) {
+      if (!isPlaying && !selectionActive) dispatchGroupAction(action);
+      return;
+    }
     // A new mask is where painting goes next, as in Photoshop.
     if (action.type === "layer/maskAdd") setEditMask(true);
     if (action.type === "layer/maskDelete") setEditMask(false);
@@ -1246,7 +1381,7 @@ const frames = activeProject?.frames.length
         const target = layer?.linkId
           ? f.layers.find((l) => l.linkId === layer.linkId)
           : f.layers.find((l) => l.kind === "base");
-        if (!target || target.locked) return f;
+        if (!target || isLockedIn(f.layers, target)) return f;
         const squashed = layerReducer(f, {
           type: "xf/squash",
           id: target.id,
@@ -1267,7 +1402,7 @@ const frames = activeProject?.frames.length
   const invertMaskShortcut = useRef<() => boolean>(() => false);
   invertMaskShortcut.current = () => {
     const l = editFrame.layers.find((x) => x.id === editor.primary?.id);
-    if (!editMask || !l?.mask || l.locked || isPlaying || selectionActive) return false;
+    if (!editMask || !l?.mask || isLockedIn(editFrame.layers, l) || isPlaying || selectionActive) return false;
     dispatchLayerPanel({ type: "layer/maskSet", id: l.id, patch: { inverted: !l.mask.inverted } });
     return true;
   };
@@ -1605,6 +1740,7 @@ const deleteProject = useCallback(
             }
             onAddBlankAllFrames={addBlankLayerAllFrames}
             onAddAdjustment={addAdjustmentLayer}
+            onAddGroup={addGroupAllFrames}
             editMask={editMask}
             onEditMaskChange={setEditMask}
             onApplyMask={applyLayerMask}

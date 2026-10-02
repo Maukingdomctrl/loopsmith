@@ -62,11 +62,16 @@ export function duplicateFrame(frame: Frame): Frame {
     };
   });
 
+  // Groups point at their new ids too.
+  const relinked = layers.map((l) =>
+    l.parentId ? { ...l, parentId: remap.get(l.parentId) ?? l.parentId } : l
+  );
+
   return {
     ...frame,
     id: createFrameId(),
     stab: { ...(frame.stab ?? ZERO_STABILIZATION) },
-    layers,
+    layers: relinked,
     activeLayerId: remap.get(frame.activeLayerId) ?? layers[0].id,
     crop: frame.crop ? { ...frame.crop } : null,
 
