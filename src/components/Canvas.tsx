@@ -428,6 +428,28 @@ const commit = useCallback((next: Frame) => {
     brushPanelVisibleRef.current = brushPanelVisible;
   }, [brushPanelVisible]);
 
+  /** The size bar (pencil, eraser, brush with its panel shut; line width for
+   *  shapes) is a pop-out like the rail's flyouts: it opens when a tool is
+   *  picked and closes on a click elsewhere, so it never sits over the work. */
+  const [sizeBarOpen, setSizeBarOpen] = useState(false);
+  const sizeBarRef = useRef<HTMLDivElement>(null);
+  const sizeBarOpenRef = useRef(false);
+  useEffect(() => {
+    sizeBarOpenRef.current = sizeBarOpen;
+  }, [sizeBarOpen]);
+  useEffect(() => {
+    if (!sizeBarOpen) return;
+    // Capture phase and never stopped: a press on the canvas both closes the
+    // bar and starts the stroke. The rail is left alone so its buttons work.
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (t && (sizeBarRef.current?.contains(t) || paintToolsRef.current?.contains(t))) return;
+      setSizeBarOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [sizeBarOpen]);
+
   const surfaceRef = useRef<RasterSurface | null>(null);
   const surfaceSrc = useRef<string | null>(null);
   /** The pencil / eraser stroke being drawn: its samples grow in place until pen-up. */
@@ -1099,9 +1121,11 @@ const commit = useCallback((next: Frame) => {
       };
       if (map[k]) {
         setPaintTool((cur) => (cur === map[k] ? "none" : map[k]));
+        setSizeBarOpen(map[k] === "pencil" || map[k] === "eraser" || map[k] === "shape");
       } else if (e.key === "Escape" && !liveRef.current && !strokeRef.current && !shapeRef.current) {
-        // Esc closes the brush panel first, then puts the tool away.
+        // Esc closes the brush panel or the size bar first, then puts the tool away.
         if (brushPanelVisibleRef.current) setBrushPanelOpen(false);
+        else if (sizeBarOpenRef.current) setSizeBarOpen(false);
         else setPaintTool("none");
       }
     };
@@ -2383,8 +2407,20 @@ onPointerCancel={(e) => {
             if (activeTool !== "brush") {
               setPaintTool("brush");
               setBrushPanelOpen(true);
+              setSizeBarOpen(false);
             } else {
               setBrushPanelOpen((open) => !open);
+            }
+            return;
+          }
+          if (id === "pencil" || id === "eraser") {
+            // Like the Brush: picking opens the size bar, a second click
+            // toggles it; Esc or another tool puts the tool away.
+            if (activeTool !== id) {
+              setPaintTool(id);
+              setSizeBarOpen(true);
+            } else {
+              setSizeBarOpen((open) => !open);
             }
             return;
           }
@@ -2422,15 +2458,17 @@ onPointerCancel={(e) => {
         onShapePick={(kind) => {
           setShapeKind(kind);
           setPaintTool("shape");
+          setSizeBarOpen(true);
         }}
         onShapeFillChange={setShapeFill}
       />
 
         {/* The brush panel carries its own size slider; this bar is for the pencil and eraser, and for the brush while its panel is shut. */}
-        {(activeTool === "pencil" ||
+        {sizeBarOpen &&
+          (activeTool === "pencil" ||
           activeTool === "eraser" ||
           (activeTool === "brush" && !brushPanelVisible)) && (
-          <div className="absolute z-50 flex h-10 items-center gap-3 rounded-panel border border-line bg-panel px-3 text-[13px] text-ink shadow-rail" style={{ left: 76, top: 52 }}>
+          <div ref={sizeBarRef} className="absolute z-50 flex h-10 items-center gap-3 rounded-panel border border-line bg-panel px-3 text-[13px] text-ink shadow-rail" style={{ left: 76, top: 52 }}>
             <span className="text-ink-2">Size</span>
             <input
               type="range"
@@ -2457,8 +2495,8 @@ onPointerCancel={(e) => {
         )}
 
         {/* Outline width for shapes (a solid shape has no outline to size). */}
-        {activeTool === "shape" && !(shapeFill && shapeKind !== "line" && shapeKind !== "arrow") && (
-          <div className="absolute z-50 flex h-10 items-center gap-3 rounded-panel border border-line bg-panel px-3 text-[13px] text-ink shadow-rail" style={{ left: 76, top: 52 }}>
+        {sizeBarOpen && activeTool === "shape" && !(shapeFill && shapeKind !== "line" && shapeKind !== "arrow") && (
+          <div ref={sizeBarRef} className="absolute z-50 flex h-10 items-center gap-3 rounded-panel border border-line bg-panel px-3 text-[13px] text-ink shadow-rail" style={{ left: 76, top: 52 }}>
             <span className="text-ink-2">Line width</span>
             <input
               type="range"
