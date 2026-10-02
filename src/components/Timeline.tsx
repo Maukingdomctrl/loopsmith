@@ -30,7 +30,6 @@ interface TimelineProps {
   /** Onion-skin frames before / after the current one; undefined while onion skin is off. */
   onion?: { before: number; after: number };
   onOnionChange: (onion: { before: number; after: number }) => void;
-  fps: number;
   loop: boolean;
   onLoopChange: (loop: boolean) => void;
   activeFrame: number;
@@ -57,7 +56,6 @@ export default function Timeline({
   onSelectionChange,
   onion,
   onOnionChange,
-  fps,
   loop,
   onLoopChange,
   activeFrame,
@@ -252,16 +250,6 @@ export default function Timeline({
           >
             <Repeat size={14} /> Loop
           </button>
-        </div>
-
-        <div className="flex items-center gap-1">
-          {/* Fixed width, so nothing shifts as the numbers change. */}
-          <p
-            title="Current frame · time · speed"
-            className="ml-3 w-44 whitespace-nowrap text-right font-mono text-[12px] text-ink-2"
-          >
-            Frame {currentFrame + 1} · {((playheadTick + 1) / fps).toFixed(2)}s · {fps} fps
-          </p>
         </div>
       </div>
 

@@ -57,6 +57,9 @@
   --color-guide-lavender: #8e86b8;
   --color-guide-sage: #7fa597;
 
+  /* Canvas card */
+  --color-stage: #ffffff;
+
   /* Scrims */
   --color-scrim: rgba(13, 13, 23, 0.7);
 
@@ -130,6 +133,19 @@ body {
   background-color: var(--color-ws);
   background-image: radial-gradient(circle, var(--color-dot) 1px, transparent 1.5px);
   background-size: 44px 44px;
+}
+
+/* Emoji guides: quiet when idle, clearer with the pointer over the canvas,
+   full while drawing or dragging. The stage sets data-guides. */
+.guide-layer {
+  opacity: 0.28;
+  transition: opacity 250ms ease;
+}
+[data-guides="near"] .guide-layer {
+  opacity: 0.7;
+}
+[data-guides="drag"] .guide-layer {
+  opacity: 1;
 }
 
 /* Sliders: 3px track, filled part in accent, 14px light thumb, no glow.

@@ -1,12 +1,21 @@
 "use client";
 
-import { guideLavender, guideSage } from "@/styles/tokens";
+import { guideLavender, guideSage, primary } from "@/styles/tokens";
 
 interface Props {
   visible: boolean;
   mode?: "face" | "fullbody";
 }
 
+/** Thin, dotted, quiet: 1px with a 3/9 dash. */
+const line = { strokeWidth: 1, strokeDasharray: "3 9", fill: "none" } as const;
+
+/**
+ * Emoji guides. The guide lines sit in one group whose opacity follows the
+ * pointer (see `.guide-layer` in globals.css): quiet when idle, clearer when
+ * the pointer is over the canvas, full while drawing or dragging. The centre
+ * crosshair stays outside that group at a steady strength.
+ */
 export default function EmojiGuides({
   visible,
   mode = "face",
@@ -15,100 +24,41 @@ export default function EmojiGuides({
 
   return (
     <svg
-      className="absolute inset-0 h-full w-full pointer-events-none"
+      className="pointer-events-none absolute inset-0 h-full w-full"
       viewBox="0 0 512 512"
+      aria-hidden
     >
-      {/* Safe Area */}
-      <circle
-        cx="256"
-        cy="256"
-        r="240"
-        fill="none"
-        stroke={guideLavender}
-        strokeWidth="1.5"
-        strokeDasharray="8 8"
-        opacity="0.45"
-      />
+      <g className="guide-layer">
+        {/* Safe area */}
+        <circle cx="256" cy="256" r="240" stroke={guideLavender} strokeOpacity={0.5} {...line} />
+        {/* Centre lines */}
+        <path d="M256 16V496" stroke={guideSage} strokeOpacity={0.5} {...line} />
+        <path d="M16 256H496" stroke={guideSage} strokeOpacity={0.45} {...line} />
 
-      {/* Vertical Center */}
-      <line
-        x1="256"
-        y1="16"
-        x2="256"
-        y2="496"
-        stroke={guideSage}
-        strokeWidth="1.5"
-        strokeDasharray="6 6"
-        opacity="0.7"
-      />
+        {mode === "face" && (
+          <>
+            {/* Eye line */}
+            <path d="M40 173H472" stroke={guideLavender} strokeOpacity={0.4} {...line} />
+            {/* Face */}
+            <circle cx="256" cy="173" r="83" stroke={guideLavender} strokeOpacity={0.55} {...line} />
+          </>
+        )}
 
-      {/* Horizontal Center */}
-      <line
-        x1="16"
-        y1="256"
-        x2="496"
-        y2="256"
-        stroke={guideSage}
-        strokeWidth="1.5"
-        strokeDasharray="6 6"
-        opacity="0.35"
-      />
+        {mode === "fullbody" && (
+          <>
+            {/* Shoulder line */}
+            <path d="M40 176H472" stroke={guideLavender} strokeOpacity={0.45} {...line} />
+            {/* Feet baseline */}
+            <path d="M40 424H472" stroke={guideSage} strokeOpacity={0.55} {...line} />
+          </>
+        )}
+      </g>
 
-      {mode === "face" && (
-        <>
-          {/* Eye Line */}
-          <line
-            x1="40"
-            y1="173"
-            x2="472"
-            y2="173"
-            stroke={guideLavender}
-            strokeWidth="1.5"
-            strokeDasharray="6 6"
-            opacity="0.8"
-          />
-
-          {/* Face Circle */}
-          <circle
-            cx="256"
-            cy="173"
-            r="83"
-            fill="none"
-            stroke={guideLavender}
-            strokeWidth="1.5"
-            strokeDasharray="5 5"
-            opacity="0.7"
-          />
-        </>
-      )}
-
-      {mode === "fullbody" && (
-        <>
-          {/* Shoulder Line */}
-          <line
-            x1="40"
-            y1="176"
-            x2="472"
-            y2="176"
-            stroke={guideLavender}
-            strokeWidth="1.5"
-            strokeDasharray="6 6"
-            opacity="0.6"
-          />
-
-          {/* Feet Baseline */}
-          <line
-            x1="40"
-            y1="424"
-            x2="472"
-            y2="424"
-            stroke={guideSage}
-            strokeWidth="1.5"
-            strokeDasharray="6 6"
-            opacity="0.9"
-          />
-        </>
-      )}
+      {/* Centre crosshair: outside the group, always at the same strength. */}
+      <g stroke={primary} strokeOpacity={0.65} strokeWidth={1.5} strokeLinecap="round" fill="none">
+        <circle cx="256" cy="256" r="9" />
+        <path d="M256 242v8M256 262v8M242 256h8M262 256h8" />
+      </g>
     </svg>
   );
 }

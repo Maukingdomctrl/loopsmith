@@ -513,6 +513,14 @@ const frames = activeProject?.frames.length
 
   // Frame shown on canvas
   const currentIndex = isPlaying ? previewFrame : activeFrame;
+  /** Pill above the canvas: frame, the time it ends its first tick, speed. */
+  const frameInfo = useMemo(() => {
+    let ticks = 0;
+    for (let i = 0; i < currentIndex && i < frames.length; i++) {
+      ticks += Math.max(1, frames[i].duration || 1);
+    }
+    return { index: currentIndex, count: frames.length, seconds: (ticks + 1) / fps, fps };
+  }, [currentIndex, frames, fps]);
 
   /** Onion-skin neighbours of the frame being edited. Hidden during playback, as in Animate. */
   const onionFrames = useMemo(() => {
@@ -1556,6 +1564,7 @@ const deleteProject = useCallback(
           onDuplicateFrame={() => insertAfterCurrent([duplicateFrame(frames[editingIndex])])}
           onClearFrame={clearActiveLayerPixels}
           onDeleteFrame={deleteSelectedFrames}
+          frameInfo={frameInfo}
         />
 
         {/* Hidden with display, not unmounted, so panel state survives a collapse. */}
@@ -1669,7 +1678,6 @@ const deleteProject = useCallback(
         selectedIds={selection}
         onSelectionChange={setSelectedIds}
         onion={onionSkin ? onionRange : undefined}
-        fps={fps}
         loop={loop}
         onLoopChange={setLoop}
         onOnionChange={setOnionRange}

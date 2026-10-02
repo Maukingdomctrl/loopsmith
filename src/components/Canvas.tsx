@@ -129,6 +129,8 @@ interface CanvasProps {
   onDuplicateFrame?: () => void;
   onClearFrame?: () => void;
   onDeleteFrame?: () => void;
+  /** Shown in the pill above the canvas. */
+  frameInfo?: { index: number; count: number; seconds: number; fps: number };
 }
 
 const ZOOM_MIN = 0.25;
@@ -209,6 +211,7 @@ export default function Canvas({
   onDuplicateFrame,
   onClearFrame,
   onDeleteFrame,
+  frameInfo,
 }: CanvasProps) {
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
   const onionCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -1993,7 +1996,14 @@ const handleCanvasPointerUp = (
     >
       <div
         ref={canvasContainerRef}
-        className="relative h-[512px] w-[512px] shrink-0 overflow-hidden rounded-stage shadow-stage transition-transform duration-200 ease-out"
+        data-guides="idle"
+        // Guides follow the pointer without re-rendering the canvas.
+        onPointerEnter={(e) => { e.currentTarget.dataset.guides = "near"; }}
+        onPointerLeave={(e) => { e.currentTarget.dataset.guides = "idle"; }}
+        onPointerDownCapture={(e) => { e.currentTarget.dataset.guides = "drag"; }}
+        onPointerUpCapture={(e) => { e.currentTarget.dataset.guides = "near"; }}
+        onPointerCancelCapture={(e) => { e.currentTarget.dataset.guides = "idle"; }}
+        className="relative h-[512px] w-[512px] shrink-0 overflow-hidden rounded-stage bg-stage shadow-stage transition-transform duration-200 ease-out"
         style={{
           touchAction: "none",
           // Pointer maths reads this element's on-screen rect, so a CSS
@@ -2250,6 +2260,24 @@ onPointerCancel={(e) => {
 
       </div>
 
+      {frameInfo && (
+        <div
+          className="pointer-events-none absolute top-4 z-40 flex h-8 -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-line bg-ctrl px-3.5 text-[13px] text-ink-2"
+          // Centred over the card, which centres to the right of the rail.
+          style={{ left: "calc(50% + 44px)" }}
+          aria-live="polite"
+        >
+          <span className="font-semibold text-ink">
+            Frame <span className="font-mono">{frameInfo.index + 1}</span> of{" "}
+            <span className="font-mono">{frameInfo.count}</span>
+          </span>
+          <span aria-hidden>·</span>
+          <span className="font-mono">{frameInfo.seconds.toFixed(2)} s</span>
+          <span aria-hidden>·</span>
+          <span className="font-mono">{frameInfo.fps} fps</span>
+        </div>
+      )}
+
       <ToolRail
         railRef={paintToolsRef}
         activeTool={activeTool}
@@ -2327,7 +2355,7 @@ onPointerCancel={(e) => {
           </div>
         )}
 
-        <div className="absolute z-50 flex gap-0.5 rounded-panel border border-line bg-panel p-1.5 shadow-rail" style={{ right: 20, top: 12 }}>
+        <div className="absolute z-50 flex gap-0.5 rounded-panel border border-line bg-panel p-1.5 shadow-rail" style={{ right: 20, bottom: 20 }}>
           <button
             onClick={() => setAlignMode(!alignMode)}
             className={`flex h-9 w-9 items-center justify-center rounded-tool ${
@@ -2426,7 +2454,7 @@ onPointerCancel={(e) => {
 
         {/* Precision controls */}
         {alignMode && (
-          <div className="absolute z-50 w-48 space-y-3 rounded-panel border border-line bg-panel p-4 shadow-rail" style={{ right: 20, bottom: 20 }}>
+          <div className="absolute z-50 w-48 space-y-3 rounded-panel border border-line bg-panel p-4 shadow-rail" style={{ right: 20, bottom: 76 }}>
             <div className="section-title">
               Alignment
             </div>
