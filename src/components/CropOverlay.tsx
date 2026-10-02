@@ -81,7 +81,7 @@ export default function CropOverlay({ draft, activeHandle, onAspect, onCommit, o
           {Math.round(r.w)} × {Math.round(r.h)}
         </span>
         <button onClick={() => onCommit(true)} title="Apply crop (Enter)"
-          className="flex h-8 w-8 items-center justify-center rounded-ctrl bg-primary text-ink hoverable"><Check size={15} /></button>
+          className="flex h-8 w-8 items-center justify-center rounded-ctrl bg-primary text-on-primary hoverable"><Check size={15} /></button>
         <button onClick={onCancel} title="Cancel (Esc)"
           className="flex h-8 w-8 items-center justify-center rounded-ctrl border border-danger-line bg-danger-bg text-danger-strong hoverable"><X size={15} /></button>
       </div>

@@ -144,7 +144,7 @@ export default function ExportDialog({
 
             <button
               onClick={onExport}
-              className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-panel bg-primary text-sm font-bold shadow-primary hoverable"
+              className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-panel bg-primary text-on-primary text-sm font-bold shadow-primary hoverable"
             >
               <Download size={16} />
               Export GIF

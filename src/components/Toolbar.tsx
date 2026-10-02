@@ -187,7 +187,7 @@ export default function Toolbar({
       <div className="flex justify-end">
         <button
           onClick={onExport}
-          className="flex h-10 items-center gap-2 rounded-ctrl bg-primary px-5 text-[14px] font-bold text-ink shadow-primary hoverable"
+          className="flex h-10 items-center gap-2 rounded-ctrl bg-primary px-5 text-[14px] font-bold text-on-primary shadow-primary hoverable"
         >
           <Download size={17} />
           Export

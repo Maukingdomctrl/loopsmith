@@ -1169,7 +1169,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
               Cancel
             </button>
             <button onClick={handleApply} disabled={!valid || !!busy}
-              className="rounded-ctrl bg-primary px-4 py-2 font-semibold hoverable disabled:opacity-40">
+              className="rounded-ctrl bg-primary text-on-primary px-4 py-2 font-semibold hoverable disabled:opacity-40">
               {busy ? `${Math.round((busy.done / busy.total) * 100)}%` : `Apply → ${frameCount} frames`}
             </button>
           </div>

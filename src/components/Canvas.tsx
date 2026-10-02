@@ -389,7 +389,7 @@ const commit = useCallback((next: Frame) => {
     if (!sec) return;
     // Sides: a little air. Top and bottom: room for the controls above the card.
     const MARGIN_X = 24;
-    const MARGIN_Y = 64;
+    const MARGIN_Y = 72;
     const ro = new ResizeObserver(() => {
       const cs = getComputedStyle(sec);
       const w = sec.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
@@ -2129,7 +2129,7 @@ onPointerCancel={(e) => {
               <div className="pointer-events-none absolute inset-0 flex h-full items-center justify-center gap-3">
                 <button
                   onClick={() => setPaintTool("pencil")}
-                  className="pointer-events-auto rounded-ctrl bg-primary hoverable px-4 py-2 text-sm font-medium text-ink"
+                  className="pointer-events-auto rounded-ctrl bg-primary hoverable px-4 py-2 text-sm font-medium text-on-primary"
                 >
                   Start drawing
                 </button>
@@ -2401,7 +2401,7 @@ onPointerCancel={(e) => {
                 disabled={points.length < 3}
                 title="Make selection from lasso"
                 aria-label="Make selection from lasso"
-                className="flex h-9 w-9 items-center justify-center rounded-tool bg-primary text-ink hoverable disabled:opacity-40"
+                className="flex h-9 w-9 items-center justify-center rounded-tool bg-primary text-on-primary hoverable disabled:opacity-40"
               >
                 <Check size={18} />
               </button>
@@ -2434,7 +2434,7 @@ onPointerCancel={(e) => {
             <>
               <button
                 onClick={applySelection}
-                className="flex h-9 w-9 items-center justify-center rounded-tool bg-primary text-ink hoverable"
+                className="flex h-9 w-9 items-center justify-center rounded-tool bg-primary text-on-primary hoverable"
                 title="Apply selection (Enter)"
                 aria-label="Apply selection"
               >
@@ -2557,7 +2557,7 @@ onPointerCancel={(e) => {
                       : baseSelection,
                 });
               }}
-              className="mt-1 h-8 w-full rounded-ctrl bg-primary hoverable text-xs font-medium text-ink disabled:opacity-40"
+              className="mt-1 h-8 w-full rounded-ctrl bg-primary hoverable text-xs font-medium text-on-primary disabled:opacity-40"
             >
               Center
             </button>

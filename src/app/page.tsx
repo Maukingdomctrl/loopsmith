@@ -100,6 +100,7 @@ import { CANVAS_SIZE } from "@/lib/frameTransform";
 import Accordion from "@/components/Accordion";
 import PanelRail from "@/components/PanelRail";
 import { useStoredFlag } from "@/hooks/useStoredFlag";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 /**
  * Where an import should land.
@@ -115,6 +116,12 @@ type ImportIntent =
   | { kind: "replace-active"; frame: number }
   | { kind: "new-layer"; frame: number }
   | { kind: "slice" };
+
+/**
+ * Focus Mode (not built yet). Setting this to true hides Projects, Layers and
+ * Properties and keeps the timeline; the panels stay mounted, so nothing is lost.
+ */
+const FOCUS_MODE: boolean = false;
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -137,10 +144,25 @@ export default function Home() {
   /** Loop playback: the selected range (2+ frames) or everything. Off = play once and stop. */
   const [loop, setLoop] = useState(true);
   /** Right panels collapse to 48px rails; open/closed is a saved view preference. */
-  const [layersOpen, setLayersOpen] = useStoredFlag("loop-panel-layers", true);
-  const [propertiesOpen, setPropertiesOpen] = useStoredFlag("loop-panel-properties", true);
+  const [layersPref, setLayersPref] = useStoredFlag("loop-panel-layers", true);
+  const [propertiesPref, setPropertiesPref] = useStoredFlag("loop-panel-properties", true);
+  /** Below 1280px the right panels start collapsed; expanding one still works. */
+  const narrow = useMediaQuery("(max-width: 1279.98px)");
+  const [expandedWhileNarrow, setExpandedWhileNarrow] = useState({ layers: false, properties: false });
+  const layersOpen = layersPref && (!narrow || expandedWhileNarrow.layers);
+  const propertiesOpen = propertiesPref && (!narrow || expandedWhileNarrow.properties);
+  const setLayersOpen = (open: boolean) => {
+    setLayersPref(open);
+    setExpandedWhileNarrow((v) => ({ ...v, layers: open && narrow }));
+  };
+  const setPropertiesOpen = (open: boolean) => {
+    setPropertiesPref(open);
+    setExpandedWhileNarrow((v) => ({ ...v, properties: open && narrow }));
+  };
   /** The canvas card grows as the right panels collapse. */
-  const stageSize = layersOpen && propertiesOpen ? 520 : layersOpen || propertiesOpen ? 580 : 640;
+  const layersShown = !FOCUS_MODE && layersOpen;
+  const propertiesShown = !FOCUS_MODE && propertiesOpen;
+  const stageSize = layersShown && propertiesShown ? 520 : layersShown || propertiesShown ? 580 : 640;
 
   const [sliceFile, setSliceFile] = useState<File | null>(null);
   const [showCutter, setShowCutter] = useState(false);
@@ -1506,24 +1528,26 @@ const deleteProject = useCallback(
       />
 
       <section className="flex min-h-0 flex-1">
-        <ProjectSidebar
-          projects={memoProjects}
-          activeProject={activeProjectId}
-          onSelect={(id) => {
-            if (id === activeProjectId) return;
+        <div className={FOCUS_MODE ? "hidden" : "contents"}>
+          <ProjectSidebar
+            projects={memoProjects}
+            activeProject={activeProjectId}
+            onSelect={(id) => {
+              if (id === activeProjectId) return;
 
-            stabilizer.cancel();
-            stabilizer.reset();
+              stabilizer.cancel();
+              stabilizer.reset();
 
-            setActiveProjectId(id);
-            setActiveFrame(0);
-            setEditingIndex(0);
-            setIsPlaying(false);
-          }}
-          onCreate={createProject}
-          onRename={renameProject}
-          onDelete={deleteProject}
-        />
+              setActiveProjectId(id);
+              setActiveFrame(0);
+              setEditingIndex(0);
+              setIsPlaying(false);
+            }}
+            onCreate={createProject}
+            onRename={renameProject}
+            onDelete={deleteProject}
+          />
+        </div>
 
         <Canvas
           projectId={activeProject?.id ?? ""}
@@ -1567,6 +1591,7 @@ const deleteProject = useCallback(
           frameInfo={frameInfo}
         />
 
+        <div className={FOCUS_MODE ? "hidden" : "contents"}>
         {/* Hidden with display, not unmounted, so panel state survives a collapse. */}
         <div className={layersOpen ? "contents" : "hidden"}>
           <LayerPanel
@@ -1669,6 +1694,7 @@ const deleteProject = useCallback(
             onExpand={() => setPropertiesOpen(true)}
           />
         )}
+        </div>
       </section>
 
       <Timeline

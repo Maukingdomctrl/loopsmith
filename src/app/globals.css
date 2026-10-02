@@ -32,6 +32,7 @@
   --color-ink-3: #7c7c94;       /* section titles */
   --color-ink-dim: #666680;     /* disabled */
   --color-on-light: #121221;    /* text on light chips (tooltips) */
+  --color-on-primary: #f4f4f8;  /* text on filled purple: 4.7:1, still not pure white */
 
   /* Icons */
   --color-icon: #b8b8cc;

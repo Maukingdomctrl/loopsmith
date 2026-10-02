@@ -412,7 +412,7 @@ export default function ToolRail(props: Props) {
           style={{ left: FLYOUT_LEFT, top: tip.top }}
         >
           {tip.label}
-          {tip.shortcut && <span className="font-mono font-medium text-ink-dim">{tip.shortcut}</span>}
+          {tip.shortcut && <span className="font-mono font-medium text-on-light/70">{tip.shortcut}</span>}
         </div>
       )}
     </>
