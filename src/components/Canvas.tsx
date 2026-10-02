@@ -131,6 +131,8 @@ interface CanvasProps {
   canRedo?: boolean;
   showGuides: boolean;
   guideMode: "face" | "fullbody";
+  /** On-screen size of the canvas card, in px. Drawing stays 512 internally. */
+  stageSize?: number;
 }
 
 const ZOOM_MIN = 0.25;
@@ -208,6 +210,7 @@ export default function Canvas({
   canRedo,
   showGuides,
   guideMode,
+  stageSize = CANVAS_SIZE,
 }: CanvasProps) {
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
   const onionCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -378,6 +381,21 @@ const commit = useCallback((next: Frame) => {
   const brushPanelRef = useRef<HTMLDivElement>(null);
   const paintToolsRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  /** Room the canvas card has, so it shrinks instead of overflowing. */
+  const [stageRoom, setStageRoom] = useState(Infinity);
+  useEffect(() => {
+    const sec = sectionRef.current;
+    if (!sec) return;
+    const STAGE_MARGIN = 24;
+    const ro = new ResizeObserver(() => {
+      setStageRoom(
+        Math.min(sec.clientWidth, sec.clientHeight) - 2 * STAGE_MARGIN
+      );
+    });
+    ro.observe(sec);
+    return () => ro.disconnect();
+  }, []);
+  const stagePx = Math.max(240, Math.min(stageSize, stageRoom));
   /** Where the brush panel sits, in the workspace's own coordinates. */
   const [brushPanelPos, setBrushPanelPos] = useState({ left: 12, top: 12 });
 
@@ -1999,8 +2017,13 @@ const handleCanvasPointerUp = (
     >
       <div
         ref={canvasContainerRef}
-        className="relative h-[512px] w-[512px] overflow-hidden rounded-stage"
-        style={{ touchAction: "none" }}
+        className="relative h-[512px] w-[512px] shrink-0 overflow-hidden rounded-stage shadow-stage transition-transform duration-200 ease-out"
+        style={{
+          touchAction: "none",
+          // Pointer maths reads this element's on-screen rect, so a CSS
+          // scale keeps every tool exact while the card grows.
+          transform: `scale(${stagePx / CANVAS_SIZE})`,
+        }}
       >
         
         {/* ---------- Canvas layer ---------- */}

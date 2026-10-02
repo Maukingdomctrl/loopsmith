@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { FolderOpen } from "lucide-react";
+import { Layers as LayersIcon, SlidersHorizontal } from "lucide-react";
 import Toolbar from "@/components/Toolbar";
 import Canvas, { type CanvasView } from "@/components/Canvas";
 import Timeline, { MAX_HOLD } from "@/components/Timeline";
@@ -98,6 +98,9 @@ import {
 } from "@/lib/layers/flatten";
 import { createLayerId, findLayer } from "@/lib/layers/layerOps";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
+import Accordion from "@/components/Accordion";
+import PanelRail from "@/components/PanelRail";
+import { useStoredFlag } from "@/hooks/useStoredFlag";
 
 /**
  * Where an import should land.
@@ -134,10 +137,11 @@ export default function Home() {
   const [onionRange, setOnionRange] = useState({ before: 1, after: 1 });
   /** Loop playback: the selected range (2+ frames) or everything. Off = play once and stop. */
   const [loop, setLoop] = useState(true);
-  const [showProjects, setShowProjects] = useState(false);
-
- 
-  const [showLayerPanel, setShowLayerPanel] = useState(true);
+  /** Right panels collapse to 48px rails; open/closed is a saved view preference. */
+  const [layersOpen, setLayersOpen] = useStoredFlag("loop-panel-layers", true);
+  const [propertiesOpen, setPropertiesOpen] = useStoredFlag("loop-panel-properties", true);
+  /** The canvas card grows as the right panels collapse. */
+  const stageSize = layersOpen && propertiesOpen ? 520 : layersOpen || propertiesOpen ? 580 : 640;
 
   const [sliceFile, setSliceFile] = useState<File | null>(null);
   const [showCutter, setShowCutter] = useState(false);
@@ -1495,42 +1499,24 @@ const deleteProject = useCallback(
       />
 
       <section className="flex min-h-0 flex-1">
-        <div className="flex shrink-0 border-r border-line bg-panel">
-          <button
-            onClick={() => setShowProjects((v) => !v)}
-            title={showProjects ? "Hide projects" : "Show projects"}
-            aria-label="Toggle projects"
-            className={`flex w-12 flex-col items-center gap-1 pt-4 text-xs ${
-              showProjects ? "text-ink" : "text-ink-2 hover:text-ink"
-            }`}
-          >
-            <FolderOpen size={20} />
-          </button>
+        <ProjectSidebar
+          projects={memoProjects}
+          activeProject={activeProjectId}
+          onSelect={(id) => {
+            if (id === activeProjectId) return;
 
-          {showProjects && (
-            <ProjectSidebar
-              projects={memoProjects}
-              activeProject={activeProjectId}
-              onSelect={(id) => {
-                if (id === activeProjectId) return;
+            stabilizer.cancel();
+            stabilizer.reset();
 
-                stabilizer.cancel();
-                stabilizer.reset();
-
-                setActiveProjectId(id);
-                setActiveFrame(0);
-                setEditingIndex(0);
-                setIsPlaying(false);
-              }}
-              onCreate={createProject}
-              onRename={renameProject}
-              onDelete={deleteProject}
-            />
-          )}
-        </div>
-        
-
-  
+            setActiveProjectId(id);
+            setActiveFrame(0);
+            setEditingIndex(0);
+            setIsPlaying(false);
+          }}
+          onCreate={createProject}
+          onRename={renameProject}
+          onDelete={deleteProject}
+        />
 
         <Canvas
           projectId={activeProject?.id ?? ""}
@@ -1565,9 +1551,11 @@ const deleteProject = useCallback(
           canRedo={redoStack.current.length > 0}
           showGuides={showGuides}
           guideMode={guideMode}
+          stageSize={stageSize}
         />
 
-        {showLayerPanel && (
+        {/* Hidden with display, not unmounted, so panel state survives a collapse. */}
+        <div className={layersOpen ? "contents" : "hidden"}>
           <LayerPanel
             layers={editFrame.layers}
             selection={editor.selection}
@@ -1583,10 +1571,21 @@ const deleteProject = useCallback(
             onEditMaskChange={setEditMask}
             onApplyMask={applyLayerMask}
             onBeginEdit={handleHistoryCommit}
+            onCollapse={() => setLayersOpen(false)}
+          />
+        </div>
+        {!layersOpen && (
+          <PanelRail
+            label="Layers"
+            icon={<LayersIcon size={17} />}
+            count={editFrame.layers.length}
+            onExpand={() => setLayersOpen(true)}
           />
         )}
 
+        <div className={propertiesOpen ? "contents" : "hidden"}>
         <RightSidebar
+          onCollapse={() => setPropertiesOpen(false)}
           activeFrame={activeFrame}
           fps={fps}
           onFpsChange={(value) =>
@@ -1615,10 +1614,7 @@ const deleteProject = useCallback(
           transparency={transparency}
           onTransparencyChange={patch}
         >
-                    <details>
-            <summary className="cursor-pointer select-none list-none py-3 text-[14px] font-medium text-ink hoverable">
-              Transform
-            </summary>
+          <Accordion title="Transform">
 
           <TransformPanel
             layer={editor.primary}
@@ -1627,11 +1623,8 @@ const deleteProject = useCallback(
             onStraightenTool={() => editor.setTool("straighten")}
             onCropTool={() => editor.beginCrop()}
           />
-                    </details>
-          <details>
-            <summary className="cursor-pointer select-none list-none py-3 text-[14px] font-medium text-ink hoverable">
-              Squash and stretch
-            </summary>
+          </Accordion>
+          <Accordion title="Squash and stretch">
             <SquashPanel
               layer={
                 editor.primary && !editor.primary.adjust
@@ -1644,7 +1637,7 @@ const deleteProject = useCallback(
               frameCount={frames.length}
               onBounce={applyBounce}
             />
-          </details>
+          </Accordion>
           <TransparencyToggle
             background={background}
             onChange={handleBackgroundChange}
@@ -1654,6 +1647,14 @@ const deleteProject = useCallback(
             artBackgroundNotice={artBgNotice}
           />
         </RightSidebar>
+        </div>
+        {!propertiesOpen && (
+          <PanelRail
+            label="Properties"
+            icon={<SlidersHorizontal size={17} />}
+            onExpand={() => setPropertiesOpen(true)}
+          />
+        )}
       </section>
 
       <Timeline

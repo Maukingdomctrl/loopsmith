@@ -2,7 +2,9 @@
 
 import React from "react";
 import type { ReactNode } from "react";
+import { ChevronsRight } from "lucide-react";
 import TransparencyPanel from "./TransparencyPanel";
+import Accordion from "./Accordion";
 import { rangeFill } from "@/styles/tokens";
 import type { TransparencyState } from "@/hooks/useTransparency";
 
@@ -21,6 +23,8 @@ interface RightSidebarProps {
   transparency: TransparencyState;
   onTransparencyChange: (patch: Partial<TransparencyState>) => void;
   children?: ReactNode;
+  /** Collapse the panel to its rail. */
+  onCollapse?: () => void;
 }
 
 function RightSidebar({
@@ -40,13 +44,27 @@ function RightSidebar({
   onTransparencyChange,
 
   children,
+  onCollapse,
 }: RightSidebarProps){
 
 
   return (
-    <aside className="w-72 shrink-0 overflow-y-auto border-l border-line bg-panel px-5 py-5">
-      <h2 className="section-title mb-5">Properties</h2>
+    <aside className="flex h-full w-[300px] shrink-0 flex-col border-l border-line bg-panel">
+      <div className="flex h-[52px] shrink-0 items-center border-b border-line pl-5 pr-2">
+        <h2 className="section-title flex-1">Properties</h2>
+        {onCollapse && (
+          <button
+            onClick={onCollapse}
+            title="Collapse properties"
+            aria-label="Collapse properties panel"
+            className="flex h-8 w-8 items-center justify-center rounded-ctrl text-icon hoverable"
+          >
+            <ChevronsRight size={17} />
+          </button>
+        )}
+      </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
       <div className="space-y-6">
         <div className="section-title">Playback</div>
 
@@ -180,25 +198,25 @@ function RightSidebar({
 
             
   </div>
-        <details className="group mt-4">
-      <summary className="cursor-pointer select-none list-none py-3 text-[14px] font-medium text-ink hoverable">
-        Eraser and transparency
-      </summary>
-    <TransparencyPanel
-    enabled={transparency.enabled}
-    tool={transparency.tool}
-    feather={transparency.feather}
-    tolerance={transparency.tolerance}
-    onEnabledChange={(v) => onTransparencyChange({ enabled: v })}
-    onToolChange={(tool) => onTransparencyChange({ tool })}
-    onFeatherChange={(feather) => onTransparencyChange({ feather })}
-    onToleranceChange={(tolerance) =>
-      onTransparencyChange({ tolerance })
-    }
-  />
-    </details>
-  {children}
-</aside>
+        <div className="mt-4">
+          <Accordion title="Eraser and transparency">
+            <TransparencyPanel
+              enabled={transparency.enabled}
+              tool={transparency.tool}
+              feather={transparency.feather}
+              tolerance={transparency.tolerance}
+              onEnabledChange={(v) => onTransparencyChange({ enabled: v })}
+              onToolChange={(tool) => onTransparencyChange({ tool })}
+              onFeatherChange={(feather) => onTransparencyChange({ feather })}
+              onToleranceChange={(tolerance) =>
+                onTransparencyChange({ tolerance })
+              }
+            />
+          </Accordion>
+          {children}
+        </div>
+      </div>
+    </aside>
   );
 }
 
