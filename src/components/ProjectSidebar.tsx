@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Pencil, Trash2, FolderOpen } from "lucide-react";
+import { Plus, Trash2, Image as ImageIcon } from "lucide-react";
 import React, { useState } from "react";
 import type { Project } from "@/types/project";
 
@@ -45,118 +45,112 @@ function ProjectSidebar({
   };
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-white/10 bg-[#11151D]">
-      <div className="flex flex-col gap-4 border-b border-white/10 p-4">
-        <div className="flex items-center gap-2 text-white">
-          <FolderOpen size={18} />
-          <h2 className="text-sm font-semibold">Projects</h2>
+    <aside className="flex h-full w-[248px] shrink-0 flex-col border-r border-line bg-panel">
+      <div className="flex flex-col gap-4 px-3 pb-3 pt-5">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="section-title">Projects</h2>
+          <span className="font-mono text-[11px] text-ink-3">{projects.length}</span>
         </div>
 
         <button
           onClick={onCreate}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-ctrl border border-line bg-ctrl px-4 text-[14px] font-medium text-ink hoverable"
         >
-          <Plus size={16} />
-          New Animation
+          <Plus size={16} className="text-icon" />
+          New animation
         </button>
+      </div>
 
-        </div>
-
-      <div className="flex-1 space-y-2 overflow-y-auto p-2">
+      <div className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
         {projects.map((project) => {
           const thumbnail =
               project.frames.find((f) => f.image)?.image ?? project.thumbnail;
+          const isActive = activeProject === project.id;
+          const frameCount = project.frames.length;
 
           return (
-            <div key={project.id}>
-              <div
-                onClick={() => {
-                  if (editingId !== project.id) onSelect(project.id);
-                }}
-                className={`group relative cursor-pointer rounded-xl border p-2 transition ${
-                  activeProject === project.id
-                    ? "border-indigo-500 bg-indigo-500/10"
-                    : "border-white/5 hover:bg-white/5"
-                }`}
-              >
-                <div className="flex gap-3">
-                  <div className="h-14 w-14 overflow-hidden rounded-lg bg-zinc-800">
-                    {thumbnail ? (
-                      <img
-                        src={thumbnail}
-                        alt={project.name}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-zinc-500">
-                        <FolderOpen size={20} />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1 pr-6">
-                    {editingId === project.id ? (
-                      <input
-                        autoFocus
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={() => saveRename(project.id, project.name)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter")
-                            saveRename(project.id, project.name);
-
-                          if (e.key === "Escape")
-                            cancelRename();
-                        }}
-                        className="w-full rounded bg-zinc-900 px-2 py-1 text-sm text-white outline-none ring-1 ring-indigo-500"
-                      />
-                    ) : (
-                      <p
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          setEditingId(project.id);
-                          setEditingName(project.name);
-                        }}
-                        className="truncate text-sm font-semibold text-white"
-                      >
-                        {project.name}
-                      </p>
-                    )}
-
-                    <p className="text-xs text-zinc-400">
-                      {project.frames.length} frames • {project.fps} FPS
-                    </p>
-
-                    <p className="mt-1 text-[10px] text-zinc-500">
-                      {new Date(project.updatedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-
-                {editingId !== project.id && (
-                  <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button
-  onClick={(e) => {
-    e.stopPropagation();
-
-    if (
-      window.confirm(
-        `Delete "${project.name}"?\n\nThis cannot be undone.`
-      )
-    ) {
-      onDelete(project.id);
-    }
-  }}
-  className="rounded p-1 text-red-400 hover:bg-red-900/30 hover:text-red-300"
-  title="Delete"
->
-  <Trash2 size={12} />
-</button>
-
-                    
+            <div
+              key={project.id}
+              onClick={() => {
+                if (editingId !== project.id) onSelect(project.id);
+              }}
+              className={`group relative flex cursor-pointer items-center gap-3 rounded-card py-2 pl-2 pr-8 ${
+                isActive
+                  ? "bg-select shadow-[inset_2px_0_0_var(--color-accent)]"
+                  : "hoverable"
+              }`}
+            >
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-card bg-ctrl">
+                {thumbnail ? (
+                  <img
+                    src={thumbnail}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-icon">
+                    <ImageIcon size={18} />
                   </div>
                 )}
               </div>
+
+              <div className="min-w-0 flex-1">
+                {editingId === project.id ? (
+                  <input
+                    autoFocus
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onBlur={() => saveRename(project.id, project.name)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter")
+                        saveRename(project.id, project.name);
+
+                      if (e.key === "Escape")
+                        cancelRename();
+                    }}
+                    aria-label="Project name"
+                    className="w-full rounded-ctrl bg-ctrl px-2 py-1 text-[14px] text-ink outline-none ring-1 ring-select-line"
+                  />
+                ) : (
+                  <p
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setEditingId(project.id);
+                      setEditingName(project.name);
+                    }}
+                    title="Double-click to rename"
+                    className={`truncate text-[14px] text-ink ${isActive ? "font-bold" : "font-semibold"}`}
+                  >
+                    {project.name}
+                  </p>
+                )}
+
+                <p className="text-[12px] text-ink-2">
+                  <span className="font-mono">{frameCount}</span> frame{frameCount === 1 ? "" : "s"} ·{" "}
+                  <span className="font-mono">{project.fps}</span> fps
+                </p>
+              </div>
+
+              {editingId !== project.id && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+
+                    if (
+                      window.confirm(
+                        `Delete "${project.name}"?\n\nThis cannot be undone.`
+                      )
+                    ) {
+                      onDelete(project.id);
+                    }
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-ctrl p-1.5 text-danger opacity-0 transition-opacity hover:bg-danger-bg hover:text-danger-strong focus-visible:opacity-100 group-hover:opacity-100"
+                  title="Delete project"
+                  aria-label={`Delete ${project.name}`}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </div>
           );
         })}

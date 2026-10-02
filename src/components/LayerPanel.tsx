@@ -10,12 +10,13 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, Unlock, Plus, Copy, Trash2, ChevronUp, ChevronDown, Layers as LayersIcon, Grid2x2Check, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown, RectangleCircle, Contrast, X, Check } from "lucide-react";
+import { Eye, EyeOff, Lock, LockOpen, Plus, Copy, Trash2, ChevronDown, ChevronsRight, ArrowUp, ArrowDown, FolderPlus, ImagePlus, CopyPlus, SlidersHorizontal, CornerLeftDown, Contrast, X, Check } from "lucide-react";
 
 import type { Adjustment, AdjustmentType, BlendMode, ColorBalanceTone, Layer, LayerSelection } from "@/types/layer";
 import { ADJUSTMENT_LABELS, BLEND_LABELS, BLEND_MODES } from "@/types/layer";
 import type { LayerAction } from "@/lib/layers/editor";
 import { BLANK_LAYER_SIZE, MAX_LAYERS_PER_FRAME } from "@/lib/layers/constants";
+import { maskTone, rangeFill } from "@/styles/tokens";
 
 interface Props {
   layers: readonly Layer[];
@@ -35,15 +36,17 @@ interface Props {
   onEditMaskChange?: (v: boolean) => void;
   /** Bake the layer's mask into its pixels and remove it. */
   onApplyMask?: (id: string) => void;
+  /** Collapse the panel to its rail. */
+  onCollapse?: () => void;
 }
 
 const ADJUSTMENT_TYPES: readonly AdjustmentType[] = ["brightnessContrast", "hueSaturation", "colorBalance"];
 
 export default function LayerPanel({
   layers, selection, disabled, onSelect, dispatch, onAddImage, onAddBlankAllFrames,
-  onAddAdjustment, onBeginEdit, editMask = false, onEditMaskChange, onApplyMask,
+  onAddAdjustment, onBeginEdit, editMask = false, onEditMaskChange, onApplyMask, onCollapse,
 }: Props) {
-  const [adjustMenu, setAdjustMenu] = useState(false);
+  const [addMenu, setAddMenu] = useState(false);
   // Reverse for display only. The index handed back to `moveLayer` is always
   // recomputed against the real array.
   const rows = useMemo(() => [...layers].reverse(), [layers]);
@@ -76,215 +79,305 @@ export default function LayerPanel({
 
   const primary = selection.primary;
   const primaryLayer = layers.find((l) => l.id === primary) ?? null;
+  const full = layers.length >= MAX_LAYERS_PER_FRAME;
+  const stack = rows.filter((l) => l.kind !== "base");
+  const base = rows.find((l) => l.kind === "base") ?? null;
+
+  const setOpacity = (layer: Layer, value: number) => {
+    if (layer.linkId) onBeginEdit?.();
+    dispatch({ type: "layer/opacity", id: layer.id, value });
+  };
+
+  const renderRow = (layer: Layer) => {
+    const isSelected = selection.ids.includes(layer.id);
+    const isBase = layer.kind === "base";
+    const opacity = Math.round(layer.opacity * 100);
+    const details = [
+      `${opacity}% opacity`,
+      layer.blend !== "normal" ? BLEND_LABELS[layer.blend] ?? layer.blend : null,
+      layer.alphaLock ? "transparent pixels locked" : null,
+      layer.crop ? "cropped" : null,
+    ].filter(Boolean).join(" · ");
+
+    return (
+      <div
+        key={layer.id}
+        draggable={!isBase && !disabled}
+        onDragStart={() => { dragFrom.current = layer.id; }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+        onDrop={(e) => { e.preventDefault(); handleDrop(layer.id); }}
+        onClick={(e) => {
+          onSelect(
+            layer.id,
+            e.shiftKey ? "range" : e.metaKey || e.ctrlKey ? "toggle" : "replace"
+          );
+          onEditMaskChange?.(false);
+        }}
+        title={details}
+        className={`flex h-10 cursor-pointer items-center gap-2 rounded-ctrl pl-2 pr-1 ${
+          isSelected ? "selected" : "hoverable"
+        }`}
+      >
+        {layer.clip && (
+          <span title="Clipped to the layer below" className="-mr-1 text-ink-3">
+            <CornerLeftDown size={12} />
+          </span>
+        )}
+        <div
+          className={`flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-[6px] border bg-ctrl ${
+            layer.mask && primary === layer.id && !editMask ? "border-select-line" : "border-line"
+          } ${layer.visible ? "" : "opacity-40"}`}
+        >
+          {layer.adjust ? (
+            <SlidersHorizontal size={13} className="text-icon" />
+          ) : (
+            layer.image && (
+              <img src={layer.image} alt="" className="h-full w-full object-contain" />
+            )
+          )}
+        </div>
+        {layer.mask && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(layer.id);
+              onEditMaskChange?.(true);
+            }}
+            disabled={disabled}
+            title="Layer mask: click to paint on it (white shows, black hides)"
+            aria-label={`Paint on ${layer.name} mask`}
+            className={`relative -ml-1 h-7 w-7 flex-shrink-0 overflow-hidden rounded-[6px] border ${
+              primary === layer.id && editMask ? "border-select-line" : "border-line"
+            }`}
+            style={{
+              background:
+                (layer.mask.fill === 255) !== layer.mask.inverted ? maskTone.show : maskTone.hide,
+            }}
+          >
+            {layer.mask.image && (
+              <img
+                src={layer.mask.image}
+                alt=""
+                className="h-full w-full object-contain"
+                style={layer.mask.inverted ? { filter: "invert(1)" } : undefined}
+              />
+            )}
+            {!layer.mask.enabled && (
+              <X size={26} className="absolute inset-0 m-auto text-danger" />
+            )}
+          </button>
+        )}
+
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {renamingId === layer.id ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => commitRename(layer.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") { setRenamingId(null); setDraft(""); }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Layer name"
+              className="w-full rounded-ctrl bg-ctrl px-1.5 py-0.5 text-[14px] text-ink outline-none"
+            />
+          ) : (
+            <span
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setRenamingId(layer.id);
+                setDraft(layer.name);
+              }}
+              className={`truncate text-[14px] ${
+                isSelected ? "font-semibold text-ink" : "font-medium text-ink"
+              } ${layer.visible ? "" : "text-ink-dim"}`}
+            >
+              {layer.name}
+            </span>
+          )}
+          {opacity < 100 && renamingId !== layer.id && (
+            <span className="shrink-0 rounded-[5px] bg-warn-bg px-1.5 py-px font-mono text-[11px] font-medium text-warn">
+              {opacity}%
+            </span>
+          )}
+        </div>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            dispatch({ type: "layer/visible", id: layer.id, value: !layer.visible });
+          }}
+          disabled={disabled}
+          title={layer.visible ? "Hide" : "Show"}
+          aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-ctrl hoverable disabled:opacity-30 ${
+            layer.visible ? "text-icon" : "text-ink-dim"
+          }`}
+        >
+          {layer.visible ? <Eye size={15} /> : <EyeOff size={15} />}
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            dispatch({ type: "layer/locked", id: layer.id, value: !layer.locked });
+          }}
+          disabled={disabled}
+          title={layer.locked ? "Unlock" : "Lock"}
+          aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-ctrl hoverable disabled:opacity-30 ${
+            layer.locked ? "text-icon" : "text-ink-dim"
+          }`}
+        >
+          {layer.locked ? <Lock size={14} /> : <LockOpen size={14} />}
+        </button>
+      </div>
+    );
+  };
+
+  const settingsTitle = !primaryLayer
+    ? ""
+    : primaryLayer.kind === "base"
+      ? "Base settings"
+      : primaryLayer.adjust
+        ? `${ADJUSTMENT_LABELS[primaryLayer.adjust.type]} settings`
+        : "Layer settings";
+
+  const tile =
+    "flex h-10 items-center justify-center gap-2 rounded-ctrl bg-ctrl text-[13px] font-semibold text-ink hoverable disabled:opacity-30";
 
   return (
-    <aside className="flex w-60 flex-col border-l border-white/10 bg-[#10131A]">
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
-          <LayersIcon size={14} />
-          Layers
-          <span className="text-zinc-500">
-            {layers.length}/{MAX_LAYERS_PER_FRAME}
-          </span>
-        </div>
-        <div className="flex items-center gap-0.5">
+    <aside className="flex h-full w-[280px] shrink-0 flex-col border-l border-line bg-panel">
+      <div className="flex h-[52px] shrink-0 items-center gap-1 border-b border-line pl-4 pr-2">
+        <h2 className="section-title">Layers</h2>
+        <span className="ml-2 flex-1 text-[12px] text-ink-2">
+          <span className="font-mono">{layers.length}</span> of{" "}
+          <span className="font-mono">{MAX_LAYERS_PER_FRAME}</span>
+        </span>
+
+        <div
+          className="relative"
+          onKeyDown={(e) => { if (e.key === "Escape") setAddMenu(false); }}
+        >
           <button
-            onClick={() =>
-              dispatch({ type: "layer/add", image: null, size: { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE } })
-            }
-            disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
-            title="New blank layer to paint on"
-            className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+            onClick={() => setAddMenu((v) => !v)}
+            disabled={disabled}
+            title="New layer"
+            aria-label="New layer"
+            aria-haspopup="menu"
+            aria-expanded={addMenu}
+            className="flex h-8 w-8 items-center justify-center rounded-ctrl text-icon hoverable disabled:opacity-30"
           >
-            <Plus size={14} />
+            <Plus size={17} />
           </button>
-          {onAddBlankAllFrames && (
-            <button
-              onClick={onAddBlankAllFrames}
-              disabled={disabled}
-              title="New blank layer on every frame"
-              className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
-            >
-              <CopyPlus size={14} />
-            </button>
-          )}
-          <button
-            onClick={onAddImage}
-            disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
-            title="Add layer from image"
-            className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
-          >
-            <ImagePlus size={14} />
-          </button>
-          {onAddAdjustment && (
-            <div className="relative">
-              <button
-                onClick={() => setAdjustMenu((v) => !v)}
-                disabled={disabled}
-                title="New adjustment layer"
-                className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
-              >
-                <SlidersHorizontal size={14} />
-              </button>
-              {adjustMenu && (
-                <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded border border-white/10 bg-zinc-900 py-1 shadow-lg">
-                  {ADJUSTMENT_TYPES.map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => { setAdjustMenu(false); onAddAdjustment(t); }}
-                      className="block w-full px-3 py-1 text-left text-xs text-zinc-200 hover:bg-zinc-700"
-                    >
-                      {ADJUSTMENT_LABELS[t]}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {rows.map((layer) => {
-          const isSelected = selection.ids.includes(layer.id);
-          const isBase = layer.kind === "base";
-
-          return (
-            <div
-              key={layer.id}
-              draggable={!isBase && !disabled}
-              onDragStart={() => { dragFrom.current = layer.id; }}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-              onDrop={(e) => { e.preventDefault(); handleDrop(layer.id); }}
-              onClick={(e) => {
-                onSelect(
-                  layer.id,
-                  e.shiftKey ? "range" : e.metaKey || e.ctrlKey ? "toggle" : "replace"
-                );
-                onEditMaskChange?.(false);
-              }}
-              className={`flex cursor-pointer items-center gap-2 border-b border-white/5 px-2 py-1.5 text-xs ${
-                isSelected ? "bg-indigo-500/20" : "hover:bg-zinc-800/60"
-              } ${primary === layer.id ? "ring-1 ring-inset ring-indigo-400" : ""}`}
-            >
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dispatch({ type: "layer/visible", id: layer.id, value: !layer.visible });
-                }}
-                disabled={disabled}
-                title={layer.visible ? "Hide" : "Show"}
-                className="text-zinc-400 hover:text-white disabled:opacity-30"
-              >
-                {layer.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-              </button>
-
-              {layer.clip && (
-                <span title="Clipped to the layer below" className="-mr-1 text-zinc-400">
-                  <CornerLeftDown size={12} />
-                </span>
-              )}
+          {addMenu && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setAddMenu(false)} />
               <div
-                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded border bg-[#1b1f28] ${
-                  layer.mask && primary === layer.id && !editMask ? "border-white" : "border-zinc-700"
-                }`}
+                role="menu"
+                className="absolute right-0 top-full z-30 mt-1 w-56 rounded-panel border border-line-strong bg-ctrl p-1 shadow-flyout"
               >
-                {layer.adjust ? (
-                  <SlidersHorizontal size={14} className="text-zinc-400" />
-                ) : (
-                  layer.image && (
-                    <img src={layer.image} alt="" className="h-full w-full object-contain" />
-                  )
+                <MenuItem
+                  icon={<Plus size={14} />}
+                  label="Blank layer"
+                  disabled={full}
+                  onClick={() => {
+                    setAddMenu(false);
+                    dispatch({ type: "layer/add", image: null, size: { w: BLANK_LAYER_SIZE, h: BLANK_LAYER_SIZE } });
+                  }}
+                />
+                {onAddBlankAllFrames && (
+                  <MenuItem
+                    icon={<CopyPlus size={14} />}
+                    label="Blank layer on every frame"
+                    onClick={() => { setAddMenu(false); onAddBlankAllFrames(); }}
+                  />
+                )}
+                <MenuItem
+                  icon={<ImagePlus size={14} />}
+                  label="Layer from image…"
+                  disabled={full}
+                  onClick={() => { setAddMenu(false); onAddImage(); }}
+                />
+                {onAddAdjustment && (
+                  <>
+                    <div className="mx-2 my-1 h-px bg-line-strong" />
+                    <div className="px-2.5 pb-1 pt-1.5 section-title">Adjustment layer</div>
+                    {ADJUSTMENT_TYPES.map((t) => (
+                      <MenuItem
+                        key={t}
+                        icon={<SlidersHorizontal size={14} />}
+                        label={ADJUSTMENT_LABELS[t]}
+                        onClick={() => { setAddMenu(false); onAddAdjustment(t); }}
+                      />
+                    ))}
+                  </>
                 )}
               </div>
-              {layer.mask && (
+            </>
+          )}
+        </div>
+        <button
+          disabled
+          title="New group (layer groups aren't available yet)"
+          aria-label="New group (not available yet)"
+          className="flex h-8 w-8 items-center justify-center rounded-ctrl text-icon disabled:opacity-30"
+        >
+          <FolderPlus size={16} />
+        </button>
+        {onCollapse && (
+          <>
+            <span className="mx-1 h-5 w-px bg-line" />
+            <button
+              onClick={onCollapse}
+              title="Collapse layers"
+              aria-label="Collapse layers panel"
+              className="flex h-8 w-8 items-center justify-center rounded-ctrl text-icon hoverable"
+            >
+              <ChevronsRight size={17} />
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="min-h-[132px] flex-1 basis-0 space-y-0.5 overflow-y-auto px-2 py-3">
+        {stack.map(renderRow)}
+        {stack.length === 0 && (
+          <p className="px-2 py-2 text-[12px] leading-relaxed text-ink-3">
+            Only the base layer so far. Use + to add one.
+          </p>
+        )}
+      </div>
+
+      {base && (
+        <div className="shrink-0 border-t border-line px-2 pb-3 pt-3">
+          <div className="section-title mb-2 px-2">Base layer</div>
+          {renderRow(base)}
+        </div>
+      )}
+
+      {/* Settings for the primary selection. */}
+      {primaryLayer && (
+        <div className="min-h-0 shrink space-y-4 overflow-y-auto border-t border-line px-4 pb-4 pt-4">
+          <div className="section-title">{settingsTitle}</div>
+
+          <div>
+            <div className="mb-1.5 flex items-baseline gap-3">
+              <span className="flex-1 text-[14px] font-medium text-ink">Opacity</span>
+              {primaryLayer.opacity < 1 && (
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect(layer.id);
-                    onEditMaskChange?.(true);
-                  }}
-                  disabled={disabled}
-                  title="Layer mask: click to paint on it (white shows, black hides)"
-                  className={`relative -ml-1 h-8 w-8 flex-shrink-0 overflow-hidden rounded border ${
-                    primary === layer.id && editMask ? "border-white" : "border-zinc-700"
-                  }`}
-                  style={{
-                    background:
-                      (layer.mask.fill === 255) !== layer.mask.inverted ? "#ffffff" : "#000000",
-                  }}
+                  onClick={() => setOpacity(primaryLayer, 1)}
+                  disabled={disabled || primaryLayer.locked}
+                  className="text-[13px] font-semibold text-accent hover:text-accent-hi disabled:opacity-40"
                 >
-                  {layer.mask.image && (
-                    <img
-                      src={layer.mask.image}
-                      alt=""
-                      className="h-full w-full object-contain"
-                      style={layer.mask.inverted ? { filter: "invert(1)" } : undefined}
-                    />
-                  )}
-                  {!layer.mask.enabled && (
-                    <X size={30} className="absolute inset-0 m-auto text-red-500" />
-                  )}
+                  Reset
                 </button>
               )}
-
-              <div className="min-w-0 flex-1">
-                {renamingId === layer.id ? (
-                  <input
-                    autoFocus
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onBlur={() => commitRename(layer.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                      if (e.key === "Escape") { setRenamingId(null); setDraft(""); }
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full rounded bg-zinc-900 px-1 text-xs text-white outline-none"
-                  />
-                ) : (
-                  <div
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setRenamingId(layer.id);
-                      setDraft(layer.name);
-                    }}
-                    className="truncate text-zinc-200"
-                    title={layer.name}
-                  >
-                    {layer.name}
-                    {isBase && <span className="ml-1 text-[9px] text-cyan-400">BASE</span>}
-                  </div>
-                )}
-                <div className="text-[9px] text-zinc-500">
-                  {Math.round(layer.opacity * 100)}%
-                  {layer.blend !== "normal" && ` · ${BLEND_LABELS[layer.blend] ?? layer.blend}`}
-                  {layer.alphaLock && " · alpha lock"}
-                  {layer.crop && " · cropped"}
-                </div>
-              </div>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dispatch({ type: "layer/locked", id: layer.id, value: !layer.locked });
-                }}
-                disabled={disabled}
-                title={layer.locked ? "Unlock" : "Lock"}
-                className={`${layer.locked ? "text-amber-400" : "text-zinc-500"} hover:text-white disabled:opacity-30`}
-              >
-                {layer.locked ? <Lock size={13} /> : <Unlock size={13} />}
-              </button>
+              <span className="w-10 text-right font-mono text-[14px] text-ink">
+                {Math.round(primaryLayer.opacity * 100)}%
+              </span>
             </div>
-          );
-        })}
-      </div>
-
-      {/* Per-layer properties for the primary selection. */}
-      {primaryLayer && (
-        <div className="space-y-2 border-t border-white/10 p-3">
-          <label className="block text-[10px] text-zinc-400">
-            Opacity — {Math.round(primaryLayer.opacity * 100)}%
             <input
               type="range" min={0} max={100} step={1}
               value={Math.round(primaryLayer.opacity * 100)}
@@ -298,9 +391,11 @@ export default function LayerPanel({
                   value: Number(e.target.value) / 100,
                 })
               }
-              className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
+              aria-label="Layer opacity"
+              className="w-full"
+              style={rangeFill(Math.round(primaryLayer.opacity * 100), 0, 100)}
             />
-          </label>
+          </div>
 
           {primaryLayer.adjust && (
             <AdjustmentControls
@@ -312,153 +407,180 @@ export default function LayerPanel({
           )}
 
           {!primaryLayer.adjust && (
-          <label className="block text-[10px] text-zinc-400">
-            Blend
-            <select
-              value={primaryLayer.blend}
-              disabled={disabled || primaryLayer.locked}
-              onChange={(e) =>
-                dispatch({
-                  type: "layer/blend",
-                  id: primaryLayer.id,
-                  value: e.target.value as BlendMode,
-                })
-              }
-              className="mt-1 w-full rounded bg-zinc-800 px-1 py-1 text-xs text-white outline-none disabled:opacity-40"
-            >
-              {BLEND_MODES.map((m) => (
-                <option key={m} value={m}>{BLEND_LABELS[m]}</option>
-              ))}
-            </select>
-          </label>
+            <label className="relative flex h-10 items-center rounded-ctrl border border-line bg-panel px-3 hoverable">
+              <span className="flex-1 text-[14px] text-ink-2">Blend</span>
+              <select
+                value={primaryLayer.blend}
+                disabled={disabled || primaryLayer.locked}
+                onChange={(e) =>
+                  dispatch({
+                    type: "layer/blend",
+                    id: primaryLayer.id,
+                    value: e.target.value as BlendMode,
+                  })
+                }
+                className="absolute inset-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                aria-label="Blend mode"
+              >
+                {BLEND_MODES.map((m) => (
+                  <option key={m} value={m}>{BLEND_LABELS[m]}</option>
+                ))}
+              </select>
+              <span className="text-[14px] font-semibold text-ink">{BLEND_LABELS[primaryLayer.blend]}</span>
+              <ChevronDown size={15} className="ml-1.5 text-icon" />
+            </label>
           )}
 
-          {primaryLayer.kind !== "base" && (
-            <button
-              onClick={() =>
-                dispatch({ type: "layer/clip", id: primaryLayer.id, value: !primaryLayer.clip })
-              }
-              disabled={disabled || primaryLayer.locked}
-              title="Clipping mask: show this layer only where the layer below has pixels"
-              className={`flex w-full items-center gap-2 rounded px-2 py-1 text-[10px] disabled:opacity-40 ${
-                primaryLayer.clip
-                  ? "bg-indigo-500/30 text-white"
-                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-              }`}
-            >
-              <CornerLeftDown size={12} />
-              Clip to layer below
-            </button>
-          )}
-
-          {!primaryLayer.adjust && (
-          <button
-            onClick={() =>
-              dispatch({
-                type: "layer/alphaLock",
-                id: primaryLayer.id,
-                value: !primaryLayer.alphaLock,
-              })
-            }
-            disabled={disabled || primaryLayer.locked}
-            title="Lock transparent pixels: paint only where this layer already has pixels"
-            className={`flex w-full items-center gap-2 rounded px-2 py-1 text-[10px] disabled:opacity-40 ${
-              primaryLayer.alphaLock
-                ? "bg-indigo-500/30 text-white"
-                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-            }`}
-          >
-            <Grid2x2Check size={12} />
-            Lock transparent pixels
-          </button>
-          )}
-
-          {!primaryLayer.mask ? (
-            <button
-              onClick={(e) =>
-                dispatch({ type: "layer/maskAdd", id: primaryLayer.id, hideAll: e.altKey })
-              }
-              disabled={disabled || primaryLayer.locked}
-              title="Add layer mask (Alt-click: a mask that hides everything)"
-              className="flex w-full items-center gap-2 rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-700 disabled:opacity-40"
-            >
-              <RectangleCircle size={12} />
-              Add mask
-            </button>
-          ) : (
-            <div className="flex items-center gap-1 text-[10px] text-zinc-400">
-              <RectangleCircle size={12} />
-              <span className="flex-1">Mask</span>
+          <div className="grid grid-cols-2 gap-2">
+            {!primaryLayer.adjust && (
               <button
                 onClick={() =>
-                  dispatch({ type: "layer/maskSet", id: primaryLayer.id, patch: { inverted: !primaryLayer.mask!.inverted } })
+                  dispatch({
+                    type: "layer/alphaLock",
+                    id: primaryLayer.id,
+                    value: !primaryLayer.alphaLock,
+                  })
                 }
                 disabled={disabled || primaryLayer.locked}
-                title="Invert mask (Ctrl+I)"
-                className="rounded bg-zinc-800 p-1 hover:bg-zinc-700 disabled:opacity-40"
-              ><Contrast size={12} /></button>
+                aria-pressed={primaryLayer.alphaLock}
+                title="Lock transparent pixels: paint only where this layer already has pixels"
+                className={`${tile} ${primaryLayer.alphaLock ? "selected text-icon-on" : ""}`}
+              >
+                <Lock size={14} />
+                Lock pixels
+              </button>
+            )}
+
+            {!primaryLayer.mask ? (
               <button
-                onClick={() =>
-                  dispatch({ type: "layer/maskSet", id: primaryLayer.id, patch: { enabled: !primaryLayer.mask!.enabled } })
+                onClick={(e) =>
+                  dispatch({ type: "layer/maskAdd", id: primaryLayer.id, hideAll: e.altKey })
                 }
                 disabled={disabled || primaryLayer.locked}
-                title={primaryLayer.mask.enabled ? "Turn mask off" : "Turn mask on"}
-                className={`rounded p-1 disabled:opacity-40 ${
-                  primaryLayer.mask.enabled ? "bg-zinc-800 hover:bg-zinc-700" : "bg-red-900/60 text-white"
-                }`}
-              >{primaryLayer.mask.enabled ? <Eye size={12} /> : <EyeOff size={12} />}</button>
-              {onApplyMask && !primaryLayer.adjust && (
+                title="Add layer mask (Alt-click: a mask that hides everything)"
+                className={tile}
+              >
+                <Contrast size={14} />
+                Add mask
+              </button>
+            ) : (
+              <div className="flex h-10 items-center gap-1 rounded-ctrl bg-ctrl px-1.5" title="Layer mask">
+                <span className="flex-1 pl-1 text-[13px] font-semibold text-ink">Mask</span>
                 <button
-                  onClick={() => onApplyMask(primaryLayer.id)}
-                  disabled={disabled || primaryLayer.locked || !primaryLayer.mask.enabled}
-                  title={
-                    primaryLayer.mask.enabled
-                      ? "Apply mask: bake it into the layer's pixels"
-                      : "Turn the mask on to apply it"
+                  onClick={() =>
+                    dispatch({ type: "layer/maskSet", id: primaryLayer.id, patch: { inverted: !primaryLayer.mask!.inverted } })
                   }
-                  className="rounded bg-zinc-800 p-1 hover:bg-zinc-700 disabled:opacity-40"
-                ><Check size={12} /></button>
-              )}
-              <button
-                onClick={() => dispatch({ type: "layer/maskDelete", id: primaryLayer.id })}
-                disabled={disabled || primaryLayer.locked}
-                title="Delete mask"
-                className="rounded bg-zinc-800 p-1 hover:bg-red-700 disabled:opacity-40"
-              ><Trash2 size={12} /></button>
-            </div>
-          )}
+                  disabled={disabled || primaryLayer.locked}
+                  title="Invert mask (Ctrl+I)"
+                  aria-label="Invert mask"
+                  className="rounded-ctrl p-1 text-icon hoverable disabled:opacity-40"
+                ><Contrast size={13} /></button>
+                <button
+                  onClick={() =>
+                    dispatch({ type: "layer/maskSet", id: primaryLayer.id, patch: { enabled: !primaryLayer.mask!.enabled } })
+                  }
+                  disabled={disabled || primaryLayer.locked}
+                  title={primaryLayer.mask.enabled ? "Turn mask off" : "Turn mask on"}
+                  aria-label={primaryLayer.mask.enabled ? "Turn mask off" : "Turn mask on"}
+                  className={`rounded-ctrl p-1 disabled:opacity-40 ${
+                    primaryLayer.mask.enabled ? "text-icon hoverable" : "bg-danger-bg text-danger-strong"
+                  }`}
+                >{primaryLayer.mask.enabled ? <Eye size={13} /> : <EyeOff size={13} />}</button>
+                {onApplyMask && !primaryLayer.adjust && (
+                  <button
+                    onClick={() => onApplyMask(primaryLayer.id)}
+                    disabled={disabled || primaryLayer.locked || !primaryLayer.mask.enabled}
+                    title={
+                      primaryLayer.mask.enabled
+                        ? "Apply mask: bake it into the layer's pixels"
+                        : "Turn the mask on to apply it"
+                    }
+                    aria-label="Apply mask"
+                    className="rounded-ctrl p-1 text-icon hoverable disabled:opacity-40"
+                  ><Check size={13} /></button>
+                )}
+                <button
+                  onClick={() => dispatch({ type: "layer/maskDelete", id: primaryLayer.id })}
+                  disabled={disabled || primaryLayer.locked}
+                  title="Delete mask"
+                  aria-label="Delete mask"
+                  className="rounded-ctrl p-1 text-danger hover:bg-danger-bg hover:text-danger-strong disabled:opacity-40"
+                ><Trash2 size={13} /></button>
+              </div>
+            )}
 
-          <div className="flex gap-1">
+            {primaryLayer.kind !== "base" && (
+              <button
+                onClick={() =>
+                  dispatch({ type: "layer/clip", id: primaryLayer.id, value: !primaryLayer.clip })
+                }
+                disabled={disabled || primaryLayer.locked}
+                aria-pressed={primaryLayer.clip}
+                title="Clipping mask: show this layer only where the layer below has pixels"
+                className={`${tile} col-span-2 ${primaryLayer.clip ? "selected text-icon-on" : ""}`}
+              >
+                <CornerLeftDown size={14} />
+                Clip to layer below
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-4 gap-2">
             <button
               onClick={() => dispatch({ type: "layer/raise", id: primaryLayer.id })}
               disabled={disabled || primaryLayer.kind === "base"}
-              className="flex-1 rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"
-              title="Raise"
-            ><ChevronUp size={13} className="mx-auto" /></button>
+              className={`${tile} text-icon`}
+              title="Move up"
+              aria-label="Move layer up"
+            ><ArrowUp size={16} /></button>
             <button
               onClick={() => dispatch({ type: "layer/lower", id: primaryLayer.id })}
               disabled={disabled || primaryLayer.kind === "base"}
-              className="flex-1 rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"
-              title="Lower"
-            ><ChevronDown size={13} className="mx-auto" /></button>
+              className={`${tile} text-icon`}
+              title="Move down"
+              aria-label="Move layer down"
+            ><ArrowDown size={16} /></button>
             <button
               onClick={() => dispatch({ type: "layer/duplicate", id: primaryLayer.id })}
-              disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
-              className="flex-1 rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"
+              disabled={disabled || full}
+              className={`${tile} text-icon`}
               title="Duplicate"
-            ><Copy size={13} className="mx-auto" /></button>
+              aria-label="Duplicate layer"
+            ><Copy size={15} /></button>
             <button
               onClick={() => dispatch({ type: "layer/remove", id: primaryLayer.id })}
               // The base layer is permanent. Disabled here AND refused by
               // removeLayer, because keyboard Delete does not pass through here.
               disabled={disabled || primaryLayer.kind === "base"}
               title={primaryLayer.kind === "base" ? "The base layer cannot be deleted" : "Delete layer"}
-              className="flex-1 rounded bg-red-700/80 p-1 hover:bg-red-600 disabled:opacity-30"
-            ><Trash2 size={13} className="mx-auto" /></button>
+              aria-label="Delete layer"
+              className="flex h-10 items-center justify-center rounded-ctrl border border-danger-line bg-danger-bg text-danger-strong hoverable disabled:opacity-30"
+            ><Trash2 size={15} /></button>
           </div>
         </div>
       )}
     </aside>
+  );
+}
+
+function MenuItem({
+  icon, label, onClick, disabled,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center gap-2.5 rounded-ctrl px-2.5 py-2 text-left text-[13px] text-ink hoverable disabled:opacity-40"
+    >
+      <span className="text-icon">{icon}</span>
+      {label}
+    </button>
   );
 }
 
@@ -480,10 +602,10 @@ function Slider({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="block text-[10px] text-zinc-400">
+    <label className="block text-[11px] text-ink-2">
       <span className="flex justify-between">
         <span>{label}</span>
-        <span className="text-zinc-300">{value > 0 ? `+${value}` : value}</span>
+        <span className="text-ink">{value > 0 ? `+${value}` : value}</span>
       </span>
       <input
         type="range" min={min} max={max} step={1}
@@ -493,7 +615,8 @@ function Slider({
         onKeyDown={(e) => { if (movesSlider(e.key)) onBegin(); }}
         onDoubleClick={() => { onBegin(); onChange(0); }}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-indigo-500 disabled:opacity-40"
+        className="w-full  disabled:opacity-40"
+        style={rangeFill(value, min, max)}
       />
     </label>
   );
@@ -546,8 +669,8 @@ function AdjustmentControls({
           <button
             key={t}
             onClick={() => setTone(t)}
-            className={`flex-1 rounded py-0.5 text-[10px] capitalize ${
-              tone === t ? "bg-indigo-500/30 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+            className={`flex-1 rounded-ctrl py-0.5 text-[11px] capitalize ${
+              tone === t ? "selected text-ink" : "bg-ctrl text-ink-2 hoverable"
             }`}
           >
             {t}

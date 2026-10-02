@@ -13,6 +13,7 @@
  */
 
 import { useMemo } from "react";
+import { cursorArt } from "@/styles/tokens";
 import type { Vec2 } from "@/types/geometry";
 import type { BrushCursorShape } from "@/types/raster";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
@@ -54,9 +55,9 @@ export default function BrushCursor({
   if (!visible || !position || !geometry) return null;
 
   const { rx, ry } = geometry;
-  const shadow = "rgba(0,0,0,0.75)";
+  const shadow = cursorArt.outline;
 
-  // The tool grows with the tip. The pencil lead ends in a rounded tip exactly
+  // The tool grows with the tip. The pencil lead ends in a rounded-ctrl tip exactly
   // as wide as the mark it leaves, and the pencil scales with it (up to 4×) so
   // it still looks like a pencil in the hand.
   const r = Math.max(rx, ry);
@@ -77,16 +78,16 @@ export default function BrushCursor({
         <g transform="rotate(-45)" stroke={shadow} strokeWidth={0.75} strokeLinejoin="round">
           {erasing ? (
             <>
-              <rect x={0} y={-h} width={12 * k} height={2 * h} rx={2 * k} fill="#F7F3EE" />
-              <rect x={12 * k} y={-h} width={16 * k} height={2 * h} rx={k} fill="#5B8DEF" />
+              <rect x={0} y={-h} width={12 * k} height={2 * h} rx={2 * k} fill={cursorArt.rubber} />
+              <rect x={12 * k} y={-h} width={16 * k} height={2 * h} rx={k} fill={cursorArt.sleeve} />
             </>
           ) : (
             <>
               <g transform={`scale(${s})`} strokeWidth={0.75 / s}>
-                <polygon points="4,-1.3 11,-3.5 11,3.5 4,1.3" fill="#E9C79B" />
-                <rect x={11} y={-3.5} width={20} height={7} fill="#F2B632" />
-                <rect x={31} y={-3.5} width={3.5} height={7} fill="#C9CDD2" />
-                <rect x={34.5} y={-3.5} width={4.5} height={7} rx={1.5} fill="#F29CA3" />
+                <polygon points="4,-1.3 11,-3.5 11,3.5 4,1.3" fill={cursorArt.wood} />
+                <rect x={11} y={-3.5} width={20} height={7} fill={cursorArt.body} />
+                <rect x={31} y={-3.5} width={3.5} height={7} fill={cursorArt.ferrule} />
+                <rect x={34.5} y={-3.5} width={4.5} height={7} rx={1.5} fill={cursorArt.eraser} />
               </g>
               <path
                 d={`M ${4 * s} ${-1.3 * s} L 0 ${-r} A ${r} ${r} 0 0 0 0 ${r} L ${4 * s} ${1.3 * s} Z`}

@@ -28,6 +28,7 @@ import {
 } from "@/lib/raster/brushes/types";
 import { BLEND_LABELS, type BlendMode } from "@/types/layer";
 import { parseHex } from "@/lib/raster/color";
+import { rangeFill } from "@/styles/tokens";
 
 /** Preview pixel density: drawn at 2× and shown at 1× so it stays crisp. */
 const DENSITY = 2;
@@ -133,7 +134,7 @@ function PreviewCanvas({
       style={{ width: w, height: h }}
       title={PREVIEW_TITLE[kind]}
       aria-label={`${spec.name}: ${PREVIEW_TITLE[kind].toLowerCase()}`}
-      className={`shrink-0 rounded-md bg-[#efede6] ${data ? "" : "opacity-40"}`}
+      className={`shrink-0 rounded-ctrl bg-ink ${data ? "" : "opacity-40"}`}
     />
   );
 }
@@ -151,7 +152,7 @@ function Slider({
 }) {
   return (
     <label className="flex items-center gap-2 text-xs">
-      <span className="w-[58px] shrink-0 text-zinc-300">{label}</span>
+      <span className="w-[58px] shrink-0 text-ink">{label}</span>
       <input
         type="range"
         min={min}
@@ -159,9 +160,10 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="min-w-0 flex-1 accent-indigo-500"
+        className="min-w-0 flex-1 "
+        style={rangeFill(value, min, max)}
       />
-      <span className="w-10 shrink-0 text-right tabular-nums text-zinc-100">
+      <span className="w-10 shrink-0 text-right font-mono text-ink">
         {format(value)}
       </span>
     </label>
@@ -191,17 +193,17 @@ export default function BrushPanel({
     <div
       role="dialog"
       aria-label="Brushes"
-      className="w-[268px] max-h-full overflow-y-auto rounded-xl border border-white/10 bg-[#141821]/95 text-white shadow-2xl backdrop-blur"
+      className="w-[268px] max-h-full overflow-y-auto rounded-panel border border-line bg-panel text-ink shadow-flyout backdrop-blur"
     >
       <div className="flex items-center justify-between px-3 pt-2.5">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+        <h2 className="section-title">
           Brushes
         </h2>
         <button
           onClick={onClose}
           title="Close (Esc)"
           aria-label="Close brush panel"
-          className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 hover:bg-white/10 hover:text-white"
+          className="flex h-6 w-6 items-center justify-center rounded-ctrl text-ink-2 hover:bg-hover hover:text-ink"
         >
           <X size={14} />
         </button>
@@ -217,10 +219,10 @@ export default function BrushPanel({
               role="radio"
               aria-checked={selected}
               onClick={() => onSelect(b.id)}
-              className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${
+              className={`flex items-center gap-2 rounded-ctrl px-2 py-1.5 text-left transition ${
                 selected
-                  ? "bg-indigo-600/20 ring-1 ring-indigo-500"
-                  : "hover:bg-white/5"
+                  ? "selected"
+                  : "hover:bg-hover"
               }`}
             >
               <PreviewCanvas
@@ -229,7 +231,7 @@ export default function BrushPanel({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between">
                   <span className="truncate text-[13px] font-medium">{b.name}</span>
-                  {selected && <Check size={13} className="shrink-0 text-indigo-300" />}
+                  {selected && <Check size={13} className="shrink-0 text-icon-on" />}
                 </div>
                 <div className="mt-1 flex items-center gap-1.5">
                   <PreviewCanvas
@@ -245,8 +247,8 @@ export default function BrushPanel({
         })}
       </div>
 
-      <div className="space-y-2.5 border-t border-white/10 px-3 pb-3 pt-2.5">
-        <p className="text-[11px] leading-snug text-zinc-400">{spec.tagline}</p>
+      <div className="space-y-2.5 border-t border-line px-3 pb-3 pt-2.5">
+        <p className="text-[11px] leading-snug text-ink-2">{spec.tagline}</p>
 
         <Slider
           label="Size"
@@ -267,11 +269,11 @@ export default function BrushPanel({
           onChange={(v) => onChange(spec.id, { intensity: v / 100 })}
         />
         <label className="flex items-center gap-2 text-xs">
-          <span className="w-[58px] shrink-0 text-zinc-300">Mode</span>
+          <span className="w-[58px] shrink-0 text-ink">Mode</span>
           <select
             value={p.mode ?? "normal"}
             onChange={(e) => onChange(spec.id, { mode: e.target.value as BlendMode })}
-            className="min-w-0 flex-1 rounded bg-zinc-800 px-1 py-1 text-xs text-white outline-none"
+            className="min-w-0 flex-1 rounded-ctrl bg-ctrl px-1 py-1 text-xs text-ink outline-none"
           >
             {BRUSH_MODES.map((m) => (
               <option key={m} value={m}>{BLEND_LABELS[m]}</option>
@@ -302,10 +304,10 @@ export default function BrushPanel({
                 role="radio"
                 aria-checked={p.material === m.id}
                 onClick={() => onChange(spec.id, { material: m.id })}
-                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                className={`rounded-ctrl px-2 py-1 text-[11px] font-medium transition ${
                   p.material === m.id
-                    ? "bg-indigo-600 text-white"
-                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    ? "selected text-icon-on"
+                    : "bg-ctrl text-ink hoverable"
                 }`}
               >
                 {m.name}

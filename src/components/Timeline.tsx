@@ -1,13 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Copy, Eraser, Trash2, Repeat } from "lucide-react";
+import { Plus, Repeat } from "lucide-react";
 import type { CanvasBackground } from "@/types/layer";
+import { checkerStyle } from "@/styles/tokens";
 
-/** Width of one tick (1/fps s) on the timeline, in px. */
-const CELL = 28;
-/** Width of the dashed "+" button at the end of the track. */
-const ADD_W = 36;
+/** Size of a frame tile, in px. */
+const TILE = 80;
+/** Space between tiles, in px. */
+const GAP = 10;
+/** Width of one tick (1/fps s) on the timeline: a tile plus its gap. */
+const CELL = TILE + GAP;
+/** Width of the "Add frame" button at the end of the track. */
+const ADD_W = 56;
 /** Longest hold a frame can have, in ticks. */
 export const MAX_HOLD = 24;
 /** Most frames the onion skin can show on each side. */
@@ -25,7 +30,6 @@ interface TimelineProps {
   /** Onion-skin frames before / after the current one; undefined while onion skin is off. */
   onion?: { before: number; after: number };
   onOnionChange: (onion: { before: number; after: number }) => void;
-  fps: number;
   loop: boolean;
   onLoopChange: (loop: boolean) => void;
   activeFrame: number;
@@ -38,8 +42,6 @@ interface TimelineProps {
   onHoldChange: (frame: number, hold: number, firstChange: boolean) => void;
   onAddFrame: () => void;
   onImportFrame: (frame: number) => void;
-  onDuplicate: () => void;
-  onClear: () => void;
   onDeleteFrame: () => void;
   onCopy: () => void;
   onPaste: () => void;
@@ -54,7 +56,6 @@ export default function Timeline({
   onSelectionChange,
   onion,
   onOnionChange,
-  fps,
   loop,
   onLoopChange,
   activeFrame,
@@ -64,16 +65,11 @@ export default function Timeline({
   onHoldChange,
   onAddFrame,
   onImportFrame,
-  onDuplicate,
-  onClear,
   onDeleteFrame,
   onCopy,
   onPaste,
   background,
 }: TimelineProps) {
-  const actionClass =
-    "flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white";
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewWidth, setViewWidth] = useState(0);
 
@@ -96,13 +92,11 @@ export default function Timeline({
     return () => ro.disconnect();
   }, []);
 
-  // The ruler runs at least to the right edge, like empty cells in Animate.
-  const rulerTicks = Math.max(totalTicks + ONION_MAX + 1, Math.ceil(viewWidth / CELL));
-  const contentWidth = Math.max(totalTicks * CELL + ADD_W + 8, rulerTicks * CELL);
+  // Room for the onion bracket past the last frame, and at least the visible width.
+  const contentWidth = Math.max(totalTicks * CELL + ADD_W + GAP, (totalTicks + ONION_MAX) * CELL, viewWidth);
 
   const playhead = Math.min(Math.max(0, currentFrame), starts.length - 1);
   const playheadTick = starts[playhead] ?? 0;
-  const playheadX = playheadTick * CELL + CELL / 2;
 
   /** The frame under a tick; past the end means the last frame. */
   const frameAtTick = (tick: number) => {
@@ -140,16 +134,16 @@ export default function Timeline({
   const onionLeft = starts[onionFirst] * CELL;
   // Past the last frame the marker runs on into the empty ruler cells, one per frame.
   const onionRight =
-    onionLast < starts.length
+    (onionLast < starts.length
       ? (starts[onionLast] + Math.max(1, durations[onionLast] || 1)) * CELL
-      : (totalTicks + onionLast - (starts.length - 1)) * CELL;
+      : (totalTicks + onionLast - (starts.length - 1)) * CELL) - GAP;
 
   const moveOnion = (e: React.PointerEvent) => {
     const side = onionDrag.current;
     const ruler = e.currentTarget.parentElement;
     if (!side || !onion || !ruler) return;
     // Brackets snap to the nearest cell edge.
-    const edge = Math.round((e.clientX - ruler.getBoundingClientRect().left) / CELL);
+    const edge = Math.round((e.clientX - ruler.getBoundingClientRect().left + (side === "after" ? GAP : 0)) / CELL);
     const count =
       side === "before"
         ? playhead - frameAtTick(Math.max(0, edge))
@@ -217,10 +211,14 @@ export default function Timeline({
     return starts.length;
   };
 
+  const bgStyle =
+    background && !background.transparent ? { background: background.color } : checkerStyle;
+
   return (
     <footer
       tabIndex={0}
-      className="flex h-28 shrink-0 flex-col border-t border-white/10 bg-[#10131A] px-5 py-2 outline-none"
+      aria-label="Timeline"
+      className="flex h-[168px] shrink-0 flex-col border-t border-line bg-panel px-5 pb-3 pt-2 outline-none"
       onKeyDown={(e) => {
         // Only while the timeline has focus, so the canvas's own Delete is untouched.
         if (e.key === "Delete" || e.key === "Backspace") {
@@ -236,114 +234,33 @@ export default function Timeline({
         }
       }}
     >
-      <div className="mb-1 flex h-7 shrink-0 items-center justify-between">
-        <div className="flex items-center gap-2">
-          <p className="text-sm text-zinc-400">Timeline ({frames.length} frames)</p>
+      <div className="mb-2 flex h-9 shrink-0 items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h2 className="section-title">Timeline</h2>
+          <span className="text-[13px] text-ink-2">
+            <span className="font-mono">{frames.length}</span> frame{frames.length === 1 ? "" : "s"}
+          </span>
           <button
             onClick={() => onLoopChange(!loop)}
             aria-pressed={loop}
             title={loop ? "Loop is on: plays the selected frames (or all) again and again" : "Loop is off: plays once and stops"}
-            className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs ${
-              loop ? "bg-indigo-500/20 text-indigo-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-white"
+            className={`flex h-8 items-center gap-1.5 rounded-ctrl px-3 text-[13px] font-semibold ${
+              loop ? "selected text-icon-on" : "text-ink-2 hoverable hover:text-ink"
             }`}
           >
             <Repeat size={14} /> Loop
           </button>
         </div>
-
-        <div className="flex items-center gap-1">
-          <button onClick={onDuplicate} className={actionClass} title="Duplicate this frame">
-            <Copy size={14} /> Duplicate
-          </button>
-          <button onClick={onClear} className={actionClass} title="Clear this frame's pixels">
-            <Eraser size={14} /> Clear
-          </button>
-          <button
-            onClick={onDeleteFrame}
-            className={`${actionClass} hover:bg-red-900/40 hover:text-red-300`}
-            title="Delete the selected frames"
-          >
-            <Trash2 size={14} /> Delete
-          </button>
-          {/* Fixed width, so nothing shifts as the numbers change. */}
-          <p
-            title="Current frame · time · speed"
-            className="ml-3 w-44 whitespace-nowrap text-right text-xs tabular-nums text-zinc-400"
-          >
-            Frame {currentFrame + 1} · {((playheadTick + 1) / fps).toFixed(2)}s · {fps} fps
-          </p>
-        </div>
       </div>
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden pl-2 [scrollbar-width:thin]"
+        className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden"
       >
         <div className="relative" style={{ width: contentWidth }}>
-          {/* Ruler: one mark per tick, a number every 5th. Click or drag to scrub. */}
           <div
-            className="relative h-4 cursor-ew-resize select-none touch-none"
-            onPointerDown={(e) => {
-              if (e.button !== 0) return;
-              e.currentTarget.setPointerCapture(e.pointerId);
-              scrubbing.current = true;
-              scrubTo(e);
-            }}
-            onPointerMove={(e) => {
-              if (scrubbing.current) scrubTo(e);
-            }}
-            onPointerUp={() => (scrubbing.current = false)}
-            onPointerCancel={() => (scrubbing.current = false)}
-          >
-            <div
-              className="absolute inset-x-0 bottom-0 h-1.5"
-              style={{
-                backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.18) 0 1px, transparent 1px ${CELL}px)`,
-              }}
-            />
-            {Array.from({ length: rulerTicks }, (_, t) => t + 1)
-              .filter((n) => n === 1 || n % 5 === 0)
-              .map((n) => (
-                <span
-                  key={n}
-                  className="absolute top-0 text-center text-[10px] leading-3 text-zinc-500"
-                  style={{ left: (n - 1) * CELL, width: CELL }}
-                >
-                  {n}
-                </span>
-              ))}
-
-            {/* Onion-skin markers: drag the brackets to show more or fewer frames. */}
-            {onion && (
-              <>
-                <div
-                  className="pointer-events-none absolute inset-y-0 bg-white/5"
-                  style={{ left: onionLeft, width: onionRight - onionLeft }}
-                />
-                <div
-                  onPointerDown={(e) => startOnion(e, "before")}
-                  onPointerMove={moveOnion}
-                  onPointerUp={() => (onionDrag.current = null)}
-                  onPointerCancel={() => (onionDrag.current = null)}
-                  title={`Onion skin: ${onion.before} before (drag)`}
-                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-l-sm border-y-2 border-l-2 border-red-400"
-                  style={{ left: onionLeft - 6 }}
-                />
-                <div
-                  onPointerDown={(e) => startOnion(e, "after")}
-                  onPointerMove={moveOnion}
-                  onPointerUp={() => (onionDrag.current = null)}
-                  onPointerCancel={() => (onionDrag.current = null)}
-                  title={`Onion skin: ${onion.after} after (drag)`}
-                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-r-sm border-y-2 border-r-2 border-green-400"
-                  style={{ left: onionRight }}
-                />
-              </>
-            )}
-          </div>
-
-          <div
-            className="relative flex h-10 select-none items-stretch"
+            className="relative flex select-none items-stretch"
+            style={{ height: TILE }}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
@@ -369,6 +286,9 @@ export default function Timeline({
                 <div
                   key={frameIds[i] ?? i}
                   role="button"
+                  tabIndex={-1}
+                  aria-label={`Frame ${i + 1}, hold ${hold}`}
+                  aria-pressed={isSelected}
                   draggable
                   title={`Frame ${i + 1} · hold ${hold}`}
                   onClick={(e) => clickFrame(e, i)}
@@ -386,41 +306,30 @@ export default function Timeline({
                     e.dataTransfer.setData("text/plain", String(i));
                   }}
                   onDragEnd={() => setDropSlot(null)}
-                  className={`relative flex flex-shrink-0 cursor-pointer border-y border-r first:border-l ${
-                    isSelected ? "border-indigo-500 bg-indigo-500/25" : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                  className={`relative flex flex-shrink-0 cursor-pointer overflow-hidden rounded-card border bg-ctrl transition-[border-color] duration-150 ${
+                    isSelected ? "border-select-strong" : "border-transparent hover:border-line-strong"
                   }`}
-                  style={{ width: hold * CELL }}
+                  style={{ width: hold * CELL - GAP, marginRight: GAP }}
                 >
-                  {/* Keyframe cell: small thumbnail, dot filled when the frame has pixels. */}
-                  <div className="flex h-full flex-col items-center justify-between py-1" style={{ width: CELL }}>
-                    <div className="h-6 w-6">
-                      {image && (
-                        <img
-                          src={image}
-                          alt={`Frame ${i + 1}`}
-                          draggable={false}
-                          className="h-full w-full object-contain"
-                          style={
-                            background && !background.transparent
-                              ? { background: background.color }
-                              : undefined
-                          }
-                        />
-                      )}
-                    </div>
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        image ? "bg-zinc-200" : "border border-zinc-400"
-                      }`}
-                    />
+                  {/* Keyframe tile: the frame on its document background. */}
+                  <div className="h-full shrink-0" style={{ width: TILE - 2, ...bgStyle }}>
+                    {image && (
+                      <img
+                        src={image}
+                        alt=""
+                        draggable={false}
+                        className="h-full w-full object-contain p-1"
+                      />
+                    )}
                   </div>
 
-                  {/* Held cells. */}
+                  {/* Held ticks. */}
                   {hold > 1 && (
                     <div
-                      className={`h-full flex-1 ${isSelected ? "bg-indigo-400/15" : "bg-zinc-600/40"}`}
+                      className={`h-full flex-1 ${isSelected ? "bg-select" : "bg-ctrl"}`}
                       style={{
-                        backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.08) 0 1px, transparent 1px ${CELL}px)`,
+                        backgroundImage: `repeating-linear-gradient(to right, var(--color-line) 0 1px, transparent 1px ${CELL}px)`,
+                        backgroundPosition: `${GAP}px 0`,
                       }}
                     />
                   )}
@@ -428,7 +337,7 @@ export default function Timeline({
                   {/* Right edge: drag to change the hold. */}
                   <div
                     title="Drag to change the hold"
-                    className="absolute inset-y-0 -right-1 z-[5] w-2 cursor-col-resize touch-none hover:bg-indigo-400/40"
+                    className="absolute inset-y-0 right-0 z-[5] w-2 cursor-col-resize touch-none hover:bg-select-line"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => {
@@ -448,31 +357,81 @@ export default function Timeline({
             {/* Where a dragged block will land. */}
             {dropSlot !== null && (
               <div
-                className="pointer-events-none absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-indigo-400"
-                style={{ left: (starts[dropSlot] ?? totalTicks) * CELL }}
+                className="pointer-events-none absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-accent"
+                style={{ left: (starts[dropSlot] ?? totalTicks) * CELL - GAP / 2 }}
               />
             )}
 
             <button
               onClick={onAddFrame}
               title="Add a blank frame"
-              className="ml-2 flex flex-shrink-0 items-center justify-center rounded-md border-2 border-dashed border-zinc-600 text-zinc-400 transition hover:border-indigo-500 hover:text-indigo-400"
+              aria-label="Add frame"
+              className="flex flex-shrink-0 items-center justify-center rounded-card bg-ctrl text-icon hoverable hover:text-ink"
               style={{ width: ADD_W }}
             >
-              <Plus size={18} />
+              <Plus size={20} />
             </button>
           </div>
 
-          {/* Playhead: red line through the current frame, with its tick number on the ruler. */}
+          {/* Frame numbers, which double as the scrub bar and carry the onion-skin brackets. */}
           <div
-            className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-red-500"
-            style={{ left: playheadX }}
-          />
-          <div
-            className="pointer-events-none absolute top-0 z-10 h-4 -translate-x-1/2 rounded-sm bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white"
-            style={{ left: playheadX, minWidth: CELL - 6 }}
+            className="relative mt-1 h-5 cursor-ew-resize select-none touch-none"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              scrubbing.current = true;
+              scrubTo(e);
+            }}
+            onPointerMove={(e) => {
+              if (scrubbing.current) scrubTo(e);
+            }}
+            onPointerUp={() => (scrubbing.current = false)}
+            onPointerCancel={() => (scrubbing.current = false)}
           >
-            {playheadTick + 1}
+            {starts.map((start, i) => {
+              const isCurrent = i === playhead;
+              return (
+                <span
+                  key={frameIds[i] ?? i}
+                  className={`absolute top-0.5 text-center font-mono text-[11px] leading-4 ${
+                    isCurrent ? "font-semibold text-accent-hi" : "text-ink-3"
+                  }`}
+                  style={{ left: start * CELL, width: TILE }}
+                >
+                  {i + 1}
+                </span>
+              );
+            })}
+
+            {/* Onion-skin markers: drag the brackets to show more or fewer frames. */}
+            {onion && (
+              <>
+                <div
+                  className="pointer-events-none absolute inset-y-0 rounded-[4px] bg-hover"
+                  style={{ left: onionLeft, width: onionRight - onionLeft }}
+                />
+                <div
+                  onPointerDown={(e) => startOnion(e, "before")}
+                  onPointerMove={moveOnion}
+                  onPointerUp={() => (onionDrag.current = null)}
+                  onPointerCancel={() => (onionDrag.current = null)}
+                  title={`Onion skin: ${onion.before} before (drag)`}
+                  aria-label={`Onion skin: ${onion.before} frames before`}
+                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-l-sm border-y-2 border-l-2 border-danger"
+                  style={{ left: onionLeft - 6 }}
+                />
+                <div
+                  onPointerDown={(e) => startOnion(e, "after")}
+                  onPointerMove={moveOnion}
+                  onPointerUp={() => (onionDrag.current = null)}
+                  onPointerCancel={() => (onionDrag.current = null)}
+                  title={`Onion skin: ${onion.after} after (drag)`}
+                  aria-label={`Onion skin: ${onion.after} frames after`}
+                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-r-sm border-y-2 border-r-2 border-success"
+                  style={{ left: onionRight }}
+                />
+              </>
+            )}
           </div>
         </div>
       </div>

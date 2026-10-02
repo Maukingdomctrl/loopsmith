@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { FolderOpen } from "lucide-react";
+import { Layers as LayersIcon, SlidersHorizontal } from "lucide-react";
 import Toolbar from "@/components/Toolbar";
 import Canvas, { type CanvasView } from "@/components/Canvas";
 import Timeline, { MAX_HOLD } from "@/components/Timeline";
@@ -11,7 +11,6 @@ import ProjectSidebar from "@/components/ProjectSidebar";
 import LayerPanel from "@/components/LayerPanel";
 import TransformPanel from "@/components/TransformPanel";
 import SquashPanel from "@/components/SquashPanel";
-import TransparencyToggle from "@/components/TransparencyToggle";
 import ExportDialog, {
   type ExportSize,
   type ExportLimit,
@@ -98,6 +97,10 @@ import {
 } from "@/lib/layers/flatten";
 import { createLayerId, findLayer } from "@/lib/layers/layerOps";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
+import Accordion from "@/components/Accordion";
+import PanelRail from "@/components/PanelRail";
+import { useStoredFlag } from "@/hooks/useStoredFlag";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 /**
  * Where an import should land.
@@ -113,6 +116,12 @@ type ImportIntent =
   | { kind: "replace-active"; frame: number }
   | { kind: "new-layer"; frame: number }
   | { kind: "slice" };
+
+/**
+ * Focus Mode (not built yet). Setting this to true hides Projects, Layers and
+ * Properties and keeps the timeline; the panels stay mounted, so nothing is lost.
+ */
+const FOCUS_MODE: boolean = false;
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -134,10 +143,26 @@ export default function Home() {
   const [onionRange, setOnionRange] = useState({ before: 1, after: 1 });
   /** Loop playback: the selected range (2+ frames) or everything. Off = play once and stop. */
   const [loop, setLoop] = useState(true);
-  const [showProjects, setShowProjects] = useState(false);
-
- 
-  const [showLayerPanel, setShowLayerPanel] = useState(true);
+  /** Right panels collapse to 48px rails; open/closed is a saved view preference. */
+  const [layersPref, setLayersPref] = useStoredFlag("loop-panel-layers", true);
+  const [propertiesPref, setPropertiesPref] = useStoredFlag("loop-panel-properties", true);
+  /** Below 1280px the right panels start collapsed; expanding one still works. */
+  const narrow = useMediaQuery("(max-width: 1279.98px)");
+  const [expandedWhileNarrow, setExpandedWhileNarrow] = useState({ layers: false, properties: false });
+  const layersOpen = layersPref && (!narrow || expandedWhileNarrow.layers);
+  const propertiesOpen = propertiesPref && (!narrow || expandedWhileNarrow.properties);
+  const setLayersOpen = (open: boolean) => {
+    setLayersPref(open);
+    setExpandedWhileNarrow((v) => ({ ...v, layers: open && narrow }));
+  };
+  const setPropertiesOpen = (open: boolean) => {
+    setPropertiesPref(open);
+    setExpandedWhileNarrow((v) => ({ ...v, properties: open && narrow }));
+  };
+  /** The canvas card grows as the right panels collapse. */
+  const layersShown = !FOCUS_MODE && layersOpen;
+  const propertiesShown = !FOCUS_MODE && propertiesOpen;
+  const stageSize = layersShown && propertiesShown ? 520 : layersShown || propertiesShown ? 580 : 640;
 
   const [sliceFile, setSliceFile] = useState<File | null>(null);
   const [showCutter, setShowCutter] = useState(false);
@@ -510,6 +535,14 @@ const frames = activeProject?.frames.length
 
   // Frame shown on canvas
   const currentIndex = isPlaying ? previewFrame : activeFrame;
+  /** Pill above the canvas: frame, the time it ends its first tick, speed. */
+  const frameInfo = useMemo(() => {
+    let ticks = 0;
+    for (let i = 0; i < currentIndex && i < frames.length; i++) {
+      ticks += Math.max(1, frames[i].duration || 1);
+    }
+    return { index: currentIndex, count: frames.length, seconds: (ticks + 1) / fps, fps };
+  }, [currentIndex, frames, fps]);
 
   /** Onion-skin neighbours of the frame being edited. Hidden during playback, as in Animate. */
   const onionFrames = useMemo(() => {
@@ -1474,7 +1507,7 @@ const deleteProject = useCallback(
   [activeProjectId, stabilizer]
 );  
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-[#0F1117] text-white">
+    <main className="flex h-screen flex-col overflow-hidden bg-ws text-ink">
       <Toolbar
         isPlaying={isPlaying}
         saveStatus={saveStatus}
@@ -1495,42 +1528,26 @@ const deleteProject = useCallback(
       />
 
       <section className="flex min-h-0 flex-1">
-        <div className="flex shrink-0 border-r border-white/10 bg-[#11151D]">
-          <button
-            onClick={() => setShowProjects((v) => !v)}
-            title={showProjects ? "Hide projects" : "Show projects"}
-            aria-label="Toggle projects"
-            className={`flex w-12 flex-col items-center gap-1 pt-4 text-xs ${
-              showProjects ? "text-white" : "text-zinc-400 hover:text-white"
-            }`}
-          >
-            <FolderOpen size={20} />
-          </button>
+        <div className={FOCUS_MODE ? "hidden" : "contents"}>
+          <ProjectSidebar
+            projects={memoProjects}
+            activeProject={activeProjectId}
+            onSelect={(id) => {
+              if (id === activeProjectId) return;
 
-          {showProjects && (
-            <ProjectSidebar
-              projects={memoProjects}
-              activeProject={activeProjectId}
-              onSelect={(id) => {
-                if (id === activeProjectId) return;
+              stabilizer.cancel();
+              stabilizer.reset();
 
-                stabilizer.cancel();
-                stabilizer.reset();
-
-                setActiveProjectId(id);
-                setActiveFrame(0);
-                setEditingIndex(0);
-                setIsPlaying(false);
-              }}
-              onCreate={createProject}
-              onRename={renameProject}
-              onDelete={deleteProject}
-            />
-          )}
+              setActiveProjectId(id);
+              setActiveFrame(0);
+              setEditingIndex(0);
+              setIsPlaying(false);
+            }}
+            onCreate={createProject}
+            onRename={renameProject}
+            onDelete={deleteProject}
+          />
         </div>
-        
-
-  
 
         <Canvas
           projectId={activeProject?.id ?? ""}
@@ -1558,16 +1575,25 @@ const deleteProject = useCallback(
           onChange={updateCurrentFrame}
           onHistoryCommit={handleHistoryCommit}
           onHistoryPushFrame={handleHistoryPushFrame}
-          onUndo={undo}
-          onRedo={redo}
           onSelectionActiveChange={setSelectionActive}
-          canUndo={undoStack.current.length > 0}
-          canRedo={redoStack.current.length > 0}
           showGuides={showGuides}
           guideMode={guideMode}
+          stageSize={stageSize}
+          onBackgroundChange={handleBackgroundChange}
+          onOnionSkinChange={setOnionSkin}
+          onGuidesChange={(show, mode) => {
+            setShowGuides(show);
+            setGuideMode(mode);
+          }}
+          onDuplicateFrame={() => insertAfterCurrent([duplicateFrame(frames[editingIndex])])}
+          onClearFrame={clearActiveLayerPixels}
+          onDeleteFrame={deleteSelectedFrames}
+          frameInfo={frameInfo}
         />
 
-        {showLayerPanel && (
+        <div className={FOCUS_MODE ? "hidden" : "contents"}>
+        {/* Hidden with display, not unmounted, so panel state survives a collapse. */}
+        <div className={layersOpen ? "contents" : "hidden"}>
           <LayerPanel
             layers={editFrame.layers}
             selection={editor.selection}
@@ -1583,10 +1609,36 @@ const deleteProject = useCallback(
             onEditMaskChange={setEditMask}
             onApplyMask={applyLayerMask}
             onBeginEdit={handleHistoryCommit}
+            onCollapse={() => setLayersOpen(false)}
+          />
+        </div>
+        {!layersOpen && (
+          <PanelRail
+            label="Layers"
+            icon={<LayersIcon size={17} />}
+            count={editFrame.layers.length}
+            onExpand={() => setLayersOpen(true)}
           />
         )}
 
+        <div className={propertiesOpen ? "contents" : "hidden"}>
         <RightSidebar
+          onCollapse={() => setPropertiesOpen(false)}
+          transparencyExtra={
+            <div className="space-y-2 pt-4">
+              <button
+                onClick={removeArtBackground}
+                disabled={isPlaying || removingArtBg}
+                title="Remove the solid colour baked into the frames (e.g. the sheet they were cut from), so it no longer moves with the artwork"
+                className="h-9 w-full rounded-ctrl bg-ctrl px-3 text-[13px] font-medium text-ink hoverable disabled:opacity-40"
+              >
+                {removingArtBg ? "Removing…" : "Remove background from art"}
+              </button>
+              {artBgNotice && (
+                <p className="text-[12px] leading-snug text-ink-2">{artBgNotice}</p>
+              )}
+            </div>
+          }
           activeFrame={activeFrame}
           fps={fps}
           onFpsChange={(value) =>
@@ -1595,8 +1647,6 @@ const deleteProject = useCallback(
               fps: value,
             }))
           }
-          onionSkin={onionSkin}
-          onToggleOnion={setOnionSkin}
           duration={frames[activeFrame]?.duration ?? 1}
           onDurationChange={(value) =>
             updateProject((project) => {
@@ -1608,17 +1658,10 @@ const deleteProject = useCallback(
               return { ...project, frames: next };
             })
           }
-          showGuides={showGuides}
-          onToggleGuides={setShowGuides}
-          guideMode={guideMode}
-          onGuideModeChange={setGuideMode}
           transparency={transparency}
           onTransparencyChange={patch}
         >
-                    <details className="border-t border-white/10">
-            <summary className="cursor-pointer select-none list-none p-3 text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
-              ▸ TRANSFORM
-            </summary>
+          <Accordion title="Transform">
 
           <TransformPanel
             layer={editor.primary}
@@ -1627,11 +1670,8 @@ const deleteProject = useCallback(
             onStraightenTool={() => editor.setTool("straighten")}
             onCropTool={() => editor.beginCrop()}
           />
-                    </details>
-          <details className="border-t border-white/10">
-            <summary className="cursor-pointer select-none list-none p-3 text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
-              ▸ SQUASH &amp; STRETCH
-            </summary>
+          </Accordion>
+          <Accordion title="Squash and stretch">
             <SquashPanel
               layer={
                 editor.primary && !editor.primary.adjust
@@ -1644,16 +1684,17 @@ const deleteProject = useCallback(
               frameCount={frames.length}
               onBounce={applyBounce}
             />
-          </details>
-          <TransparencyToggle
-            background={background}
-            onChange={handleBackgroundChange}
-            disabled={isPlaying}
-            onRemoveArtBackground={removeArtBackground}
-            removingArtBackground={removingArtBg}
-            artBackgroundNotice={artBgNotice}
-          />
+          </Accordion>
         </RightSidebar>
+        </div>
+        {!propertiesOpen && (
+          <PanelRail
+            label="Properties"
+            icon={<SlidersHorizontal size={17} />}
+            onExpand={() => setPropertiesOpen(true)}
+          />
+        )}
+        </div>
       </section>
 
       <Timeline
@@ -1663,7 +1704,6 @@ const deleteProject = useCallback(
         selectedIds={selection}
         onSelectionChange={setSelectedIds}
         onion={onionSkin ? onionRange : undefined}
-        fps={fps}
         loop={loop}
         onLoopChange={setLoop}
         onOnionChange={setOnionRange}
@@ -1708,8 +1748,6 @@ const deleteProject = useCallback(
           selectFrame(frame);
           openPicker({ kind: "replace-active", frame });
         }}
-                onClear={clearActiveLayerPixels}
-        onDuplicate={() => insertAfterCurrent([duplicateFrame(frames[editingIndex])])}
         onDeleteFrame={deleteSelectedFrames}
         onCopy={() => {
           frameClipboard.current = frames.filter((f) => selection.includes(f.id));

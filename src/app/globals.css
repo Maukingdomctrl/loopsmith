@@ -1,30 +1,225 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens: the ONE place UI colours, fonts, radii and shadows live.
+ * Components use the Tailwind utilities these generate (bg-panel,
+ * text-ink-2, rounded-ctrl, shadow-flyout, font-mono …), never raw hex.
+ * Colours that JS must hand to a 2D canvas or to document data live in
+ * src/styles/tokens.ts.
+ *
+ * Purple means interaction and selection only, never decoration.
+ */
+@theme {
+  /* Surfaces: three levels, never add new ones */
+  --color-ws: #0d0d17;          /* level 0: workspace */
+  --color-panel: #121221;       /* level 1: panels */
+  --color-ctrl: #19192b;        /* level 2: controls */
+  --color-ctrl-hi: #1f1f33;     /* level 2: hover / raised */
+  --color-select: rgba(139, 108, 255, 0.1);         /* level 3: selected fill */
+  --color-select-line: rgba(139, 108, 255, 0.55);   /* level 3: selected border */
+  --color-select-strong: rgba(139, 108, 255, 0.8);  /* selected timeline frame */
+  --color-hover: rgba(255, 255, 255, 0.07);         /* hover overlay */
+  --color-dot: #15152a;         /* workspace dots */
+
+  /* Borders and dividers */
+  --color-line: #27273a;        /* panels */
+  --color-line-strong: #323248; /* menus, tool-rail dividers */
+  --color-track: #26263a;       /* slider tracks, tree guides */
+
+  /* Text */
+  --color-ink: #e0e0ea;         /* primary: never pure white */
+  --color-ink-2: #8e8ea6;       /* secondary */
+  --color-ink-3: #7c7c94;       /* section titles */
+  --color-ink-dim: #666680;     /* disabled */
+  --color-on-light: #121221;    /* text on light chips (tooltips) */
+  --color-on-primary: #f4f4f8;  /* text on filled purple: 4.7:1, still not pure white */
+
+  /* Icons */
+  --color-icon: #b8b8cc;
+  --color-icon-on: #c4b8ff;     /* selected */
+  --color-icon-accent: #a18aff;
+
+  /* Accent */
+  --color-primary: #6f52e8;     /* selection / primary button */
+  --color-accent: #8b6cff;
+  --color-accent-hi: #a18aff;   /* hover, focus ring */
+  --color-accent-tint: rgba(139, 108, 255, 0.14); /* logo mark */
+
+  /* Status */
+  --color-success: #4fa683;
+  --color-danger: #d98a92;              /* destructive text / icon */
+  --color-danger-line: #5b2a31;
+  --color-danger-bg: rgba(255, 90, 100, 0.1);
+  --color-danger-strong: #ff9aa2;
+  --color-warn: #f5c16c;                /* amber badges, "outdated" */
+  --color-warn-bg: #3a2f18;
+
+  /* Emoji guides */
+  --color-guide-lavender: #8e86b8;
+  --color-guide-sage: #7fa597;
+
+  /* Canvas card */
+  --color-stage: #ffffff;
+
+  /* Scrims */
+  --color-scrim: rgba(13, 13, 23, 0.7);
+
+  /* Fonts (loaded in layout.tsx) */
+  --font-display: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-dm-mono), ui-monospace, monospace;
+
+  /* Radius */
+  --radius-ctrl: 8px;
+  --radius-tool: 9px;
+  --radius-card: 10px;
+  --radius-panel: 14px;
+  --radius-stage: 20px;
+
+  /* Shadows: soft, no colour glow (except the primary action) */
+  --shadow-panel: 0 6px 20px rgba(0, 0, 0, 0.18);
+  --shadow-rail: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-flyout: 0 10px 28px rgba(0, 0, 0, 0.4);
+  --shadow-stage: 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-primary: 0 2px 8px rgba(111, 82, 232, 0.22);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  color-scheme: dark;
+  --ease: 160ms ease;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-ws);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-.toolbar-btn {
-  @apply flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-white transition hover:bg-white/10;
+/* Visible focus ring everywhere: 2px accent, offset 2px. */
+:focus-visible {
+  outline: 2px solid var(--color-accent-hi);
+  outline-offset: 2px;
+}
+
+/* Hover = a light overlay on whatever surface the control already has. */
+@utility hoverable {
+  transition: background-color var(--ease), color var(--ease), border-color var(--ease),
+    transform var(--ease);
+  &:hover:not(:disabled) {
+    background-image: linear-gradient(var(--color-hover), var(--color-hover));
+  }
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+}
+
+/* Selected = tint plus thin border, no glow. */
+@utility selected {
+  background-color: var(--color-select);
+  box-shadow: inset 0 0 0 1px var(--color-select-line);
+}
+
+/* Section title: 11px/600, sentence case. */
+@utility section-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--color-ink-3);
+}
+
+/* Workspace behind the canvas: dotted only. */
+@utility workspace-dots {
+  background-color: var(--color-ws);
+  background-image: radial-gradient(circle, var(--color-dot) 1px, transparent 1.5px);
+  background-size: 44px 44px;
+}
+
+/* Emoji guides: quiet when idle, clearer with the pointer over the canvas,
+   full while drawing or dragging. The stage sets data-guides. */
+.guide-layer {
+  opacity: 0.28;
+  transition: opacity 250ms ease;
+}
+[data-guides="near"] .guide-layer {
+  opacity: 0.7;
+}
+[data-guides="drag"] .guide-layer {
+  opacity: 1;
+}
+
+/* Sliders: 3px track, filled part in accent, 14px light thumb, no glow.
+   The filled part reads `--fill` (0%–100%), set by `rangeFill()`. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) var(--fill, 0%),
+    var(--color-track) var(--fill, 0%)
+  );
+}
+input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-track);
+}
+input[type="range"]::-moz-range-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5.5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-ink);
+  transition: transform var(--ease);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-ink);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+input[type="range"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Native checkboxes pick up the accent without a glow. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-accent);
+}
+
+/* Thin, quiet scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
 }

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { gridFromCuts, type SpriteGrid } from "@/lib/sprite";
 import { extractCleanCells } from "@/lib/sprite/slice";
+import { cutter } from "@/styles/tokens";
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * MATHEMATICS
@@ -798,7 +799,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
       const q = 8;
       for (let y = 0; y < h; y += q) {
         for (let x = 0; x < w; x += q) {
-          ctx.fillStyle = ((x / q + y / q) & 1) ? "#18181b" : "#111113";
+          ctx.fillStyle = ((x / q + y / q) & 1) ? cutter.checkerA : cutter.checkerB;
           ctx.fillRect(x, y, Math.min(q, w - x), Math.min(q, h - y));
         }
       }
@@ -815,7 +816,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
         const px = model.x, py = model.y;
         ctx.save();
         ctx.translate(RULER, 0);
-        ctx.fillStyle = "rgba(34,211,238,0.30)";
+        ctx.fillStyle = cutter.profile;
         ctx.beginPath();
         ctx.moveTo(0, RULER);
         for (let i = 0; i < px.profile.length; i++) {
@@ -827,7 +828,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
         ctx.fill();
         // Otsu level: below this line is a gutter.
         const tx = RULER - Math.min(RULER - 1, (px.threshold / px.peak) * (PROFILE_H - 4));
-        ctx.strokeStyle = "rgba(250,204,21,0.55)";
+        ctx.strokeStyle = cutter.profileLine;
         ctx.setLineDash([3, 3]);
         ctx.beginPath(); ctx.moveTo(0, tx + 0.5); ctx.lineTo(w, tx + 0.5); ctx.stroke();
         ctx.setLineDash([]);
@@ -835,7 +836,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
 
         ctx.save();
         ctx.translate(0, RULER);
-        ctx.fillStyle = "rgba(34,211,238,0.30)";
+        ctx.fillStyle = cutter.profile;
         ctx.beginPath();
         ctx.moveTo(RULER, 0);
         for (let i = 0; i < py.profile.length; i++) {
@@ -846,14 +847,14 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
         ctx.closePath();
         ctx.fill();
         const ty = RULER - Math.min(RULER - 1, (py.threshold / py.peak) * (PROFILE_H - 4));
-        ctx.strokeStyle = "rgba(250,204,21,0.55)";
+        ctx.strokeStyle = cutter.profileLine;
         ctx.setLineDash([3, 3]);
         ctx.beginPath(); ctx.moveTo(ty + 0.5, 0); ctx.lineTo(ty + 0.5, h); ctx.stroke();
         ctx.setLineDash([]);
         ctx.restore();
 
         // Detected gutter centres as faint ticks: targets, not decisions.
-        ctx.strokeStyle = "rgba(74,222,128,0.35)";
+        ctx.strokeStyle = cutter.centers;
         ctx.setLineDash([2, 6]);
         ctx.beginPath();
         for (const c of px.centers) {
@@ -872,7 +873,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
       const drawCut = (axis: Axis, v: number, active: boolean) => {
         const p = RULER + v * scale + 0.5;
         ctx.lineWidth = active ? 2 : 1;
-        ctx.strokeStyle = active ? "#facc15" : "#f472b6";
+        ctx.strokeStyle = active ? cutter.cutActive : cutter.cut;
         ctx.beginPath();
         if (axis === "x") { ctx.moveTo(p, RULER); ctx.lineTo(p, RULER + h); }
         else { ctx.moveTo(RULER, p); ctx.lineTo(RULER + w, p); }
@@ -884,14 +885,14 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
       // Cell extents, centred in each span. Suppressed when they would collide.
       ctx.font = "10px ui-monospace, monospace";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "#a5f3fc";
+      ctx.fillStyle = cutter.labelX;
       ctx.textAlign = "center";
       for (let i = 1; i < boundsX.length; i++) {
         const span = (boundsX[i] - boundsX[i - 1]) * scale;
         if (span < 22) continue;
         ctx.fillText(String(boundsX[i] - boundsX[i - 1]), RULER + ((boundsX[i - 1] + boundsX[i]) / 2) * scale, RULER - PROFILE_H / 2 + 8);
       }
-      ctx.fillStyle = "#fef08a";
+      ctx.fillStyle = cutter.labelY;
       ctx.textAlign = "center";
       for (let i = 1; i < boundsY.length; i++) {
         const span = (boundsY[i] - boundsY[i - 1]) * scale;
@@ -915,7 +916,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
 
         ctx.setLineDash([4, 4]);
         ctx.lineWidth = 1;
-        ctx.strokeStyle = "#a7f3d0";
+        ctx.strokeStyle = cutter.hover;
         const p = RULER + v * scale + 0.5;
         ctx.beginPath();
         if (axis === "x") { ctx.moveTo(p, RULER); ctx.lineTo(p, RULER + h); }
@@ -923,7 +924,7 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
         ctx.stroke();
 
         if (near >= 0) {
-          ctx.strokeStyle = "#4ade80";
+          ctx.strokeStyle = cutter.snap;
           ctx.lineWidth = 2;
           const q2 = RULER + near * scale + 0.5;
           ctx.beginPath();
@@ -1015,108 +1016,108 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
     tool === "del" ? "not-allowed" : "default";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
-      <div className="flex max-h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-zinc-900 text-white shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4">
+      <div className="flex max-h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-panel bg-panel text-ink shadow-flyout">
         {/* header */}
-        <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
             <h2 className="text-lg font-semibold">Adjust Grid &amp; Cut</h2>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-ink-3">
               {img ? `${img.width} × ${img.height} px` : "…"}
-              {model && <> · occupancy: <span className="text-zinc-400">{model.kind}</span></>}
+              {model && <> · occupancy: <span className="text-ink-2">{model.kind}</span></>}
               {model && <> · gutters: {gutterCount("x")}↕ / {gutterCount("y")}↔</>}
             </p>
           </div>
-          <button onClick={onCancel} className="rounded px-2 text-zinc-400 hover:text-white" aria-label="Close">✕</button>
+          <button onClick={onCancel} className="rounded-ctrl px-2 text-ink-2 hover:text-ink" aria-label="Close">✕</button>
         </div>
 
         {/* toolbar */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2 text-sm">
           {([["move", "Move"], ["addV", "＋ Vertical"], ["addH", "＋ Horizontal"], ["del", "Delete"]] as const).map(
             ([key, label]) => (
               <button
                 key={key}
                 onClick={() => setTool(key)}
-                className={`rounded px-3 py-1 ${tool === key ? "bg-violet-600" : "bg-zinc-800 hover:bg-zinc-700"}`}
+                className={`rounded-ctrl px-3 py-1 ${tool === key ? "selected text-icon-on" : "bg-ctrl hoverable"}`}
               >
                 {label}
               </button>
             )
           )}
 
-          <span className="mx-1 h-5 w-px bg-zinc-700" />
+          <span className="mx-1 h-5 w-px bg-ctrl-hi" />
 
           <div className="flex items-center gap-1">
             <input
               type="number" min={1} max={64} value={cols}
               onChange={(e) => setCols(Number(e.target.value))}
-              className="w-14 rounded bg-zinc-800 px-2 py-1 text-center tabular-nums outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-14 rounded-ctrl bg-ctrl px-2 py-1 text-center font-mono outline-none focus:ring-1 focus:ring-accent"
               aria-label="Columns"
             />
-            <span className="text-zinc-500">×</span>
+            <span className="text-ink-3">×</span>
             <input
               type="number" min={1} max={64} value={rows}
               onChange={(e) => setRows(Number(e.target.value))}
-              className="w-14 rounded bg-zinc-800 px-2 py-1 text-center tabular-nums outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-14 rounded-ctrl bg-ctrl px-2 py-1 text-center font-mono outline-none focus:ring-1 focus:ring-accent"
               aria-label="Rows"
             />
-            <button onClick={applyUniform} className="rounded bg-zinc-800 px-3 py-1 hover:bg-zinc-700" title="Rule a uniform grid; any indivisible remainder is cropped symmetrically">
+            <button onClick={applyUniform} className="rounded-ctrl bg-ctrl px-3 py-1 hoverable" title="Rule a uniform grid; any indivisible remainder is cropped symmetrically">
               Rule uniform
             </button>
           </div>
 
-          <span className="mx-1 h-5 w-px bg-zinc-700" />
+          <span className="mx-1 h-5 w-px bg-ctrl-hi" />
 
           <button onClick={snapAll} disabled={cutsX.length + cutsY.length === 0}
-            className="rounded bg-zinc-800 px-3 py-1 hover:bg-zinc-700 disabled:opacity-40"
+            className="rounded-ctrl bg-ctrl px-3 py-1 hoverable disabled:opacity-40"
             title="Pull each line to the nearest detected gutter centre (≤24 px)">
             Snap to gutters
           </button>
           <button onClick={() => ruleFromGutters("x")} disabled={gutterCount("x") === 0}
-            className="rounded bg-zinc-800 px-3 py-1 hover:bg-zinc-700 disabled:opacity-40"
+            className="rounded-ctrl bg-ctrl px-3 py-1 hoverable disabled:opacity-40"
             title="One vertical line per detected gutter">
             Rule cols ({gutterCount("x")})
           </button>
           <button onClick={() => ruleFromGutters("y")} disabled={gutterCount("y") === 0}
-            className="rounded bg-zinc-800 px-3 py-1 hover:bg-zinc-700 disabled:opacity-40"
+            className="rounded-ctrl bg-ctrl px-3 py-1 hoverable disabled:opacity-40"
             title="One horizontal line per detected gutter">
             Rule rows ({gutterCount("y")})
           </button>
 
-          <span className="mx-1 h-5 w-px bg-zinc-700" />
+          <span className="mx-1 h-5 w-px bg-ctrl-hi" />
 
           <button onClick={() => dispatch({ type: "undo" })} disabled={state.past.length === 0}
-            className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700 disabled:opacity-40">↶</button>
+            className="rounded-ctrl bg-ctrl px-2 py-1 hoverable disabled:opacity-40">↶</button>
           <button onClick={() => dispatch({ type: "redo" })} disabled={state.future.length === 0}
-            className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700 disabled:opacity-40">↷</button>
+            className="rounded-ctrl bg-ctrl px-2 py-1 hoverable disabled:opacity-40">↷</button>
           <button onClick={() => dispatch({ type: "clear" })} disabled={cutsX.length + cutsY.length === 0}
-            className="rounded bg-zinc-800 px-3 py-1 hover:bg-zinc-700 disabled:opacity-40">Clear</button>
+            className="rounded-ctrl bg-ctrl px-3 py-1 hoverable disabled:opacity-40">Clear</button>
 
-          <span className="mx-1 h-5 w-px bg-zinc-700" />
+          <span className="mx-1 h-5 w-px bg-ctrl-hi" />
 
-          <button onClick={() => setZoom((z) => Math.max(0.25, +(z / 1.5).toFixed(4)))} className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700">−</button>
-          <span className="w-14 text-center tabular-nums text-zinc-400">{Math.round(scale * 100)}%</span>
-          <button onClick={() => setZoom((z) => Math.min(16, +(z * 1.5).toFixed(4)))} className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700">＋</button>
-          <button onClick={() => setZoom(1)} className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700">Fit</button>
+          <button onClick={() => setZoom((z) => Math.max(0.25, +(z / 1.5).toFixed(4)))} className="rounded-ctrl bg-ctrl px-2 py-1 hoverable">−</button>
+          <span className="w-14 text-center font-mono text-ink-2">{Math.round(scale * 100)}%</span>
+          <button onClick={() => setZoom((z) => Math.min(16, +(z * 1.5).toFixed(4)))} className="rounded-ctrl bg-ctrl px-2 py-1 hoverable">＋</button>
+          <button onClick={() => setZoom(1)} className="rounded-ctrl bg-ctrl px-2 py-1 hoverable">Fit</button>
 
           <label
-            className="ml-auto flex cursor-pointer items-center gap-2 text-zinc-400"
+            className="ml-auto flex cursor-pointer items-center gap-2 text-ink-2"
             title="Each frame keeps only its own sprite. Pieces of neighbours and lines drawn by the AI become transparent."
           >
-            <input type="checkbox" checked={cleanEdges} onChange={(e) => setCleanEdges(e.target.checked)} className="accent-violet-500" />
+            <input type="checkbox" checked={cleanEdges} onChange={(e) => setCleanEdges(e.target.checked)} className="" />
             Clean edges
           </label>
 
-          <label className="flex cursor-pointer items-center gap-2 text-zinc-400">
-            <input type="checkbox" checked={showProfiles} onChange={(e) => setShowProfiles(e.target.checked)} className="accent-violet-500" />
+          <label className="flex cursor-pointer items-center gap-2 text-ink-2">
+            <input type="checkbox" checked={showProfiles} onChange={(e) => setShowProfiles(e.target.checked)} className="" />
             Profiles
           </label>
         </div>
 
         {/* canvas */}
-        <div className="flex flex-1 justify-center overflow-auto bg-zinc-950 p-3">
+        <div className="flex flex-1 justify-center overflow-auto bg-panel p-3">
           {error ? (
-            <div className="flex h-64 items-center text-sm text-red-400">{error}</div>
+            <div className="flex h-64 items-center text-sm text-danger">{error}</div>
           ) : img ? (
             <canvas
               ref={canvasRef}
@@ -1128,31 +1129,31 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
               style={{ touchAction: "none", cursor, imageRendering: "pixelated" }}
             />
           ) : (
-            <div className="flex h-64 items-center text-zinc-500">Loading image…</div>
+            <div className="flex h-64 items-center text-ink-3">Loading image…</div>
           )}
         </div>
 
         {/* measurements */}
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1 border-t border-zinc-800 px-4 py-2 text-xs text-zinc-400 sm:grid-cols-4">
-          <div>Frames <span className="font-semibold text-violet-300">{frameCount}</span></div>
-          <div>Cell <span className="text-zinc-200">{report.modalW} × {report.modalH}</span>{!report.uniform && <span className="text-amber-400"> (modal)</span>}</div>
-          <div>Min cell <span className={report.minCell < MIN_CELL ? "text-red-400" : "text-zinc-200"}>{Number.isFinite(report.minCell) ? report.minCell : 0}</span></div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 border-t border-line px-4 py-2 text-xs text-ink-2 sm:grid-cols-4">
+          <div>Frames <span className="font-semibold text-icon-on">{frameCount}</span></div>
+          <div>Cell <span className="text-ink">{report.modalW} × {report.modalH}</span>{!report.uniform && <span className="text-warn"> (modal)</span>}</div>
+          <div>Min cell <span className={report.minCell < MIN_CELL ? "text-danger" : "text-ink"}>{Number.isFinite(report.minCell) ? report.minCell : 0}</span></div>
           <div>Uniformity {report.uniform
-            ? <span className="text-emerald-400">exact</span>
-            : <span className="text-amber-400">MAD {report.madX}/{report.madY}</span>}</div>
+            ? <span className="text-success">exact</span>
+            : <span className="text-warn">MAD {report.madX}/{report.madY}</span>}</div>
           <div className="col-span-2 sm:col-span-4">
             Seams on gutters:{" "}
             <SeamBadge label="cols" v={report.seamX} />{" "}
             <SeamBadge label="rows" v={report.seamY} />
-            <span className="ml-2 text-zinc-600">
+            <span className="ml-2 text-ink-dim">
               (advisory — nothing is enforced; ↑↓←→ nudges, ⇧ ×8, ⌫ deletes, ⌘Z undoes)
             </span>
           </div>
         </div>
 
         {/* footer */}
-        <div className="flex items-center justify-between border-t border-zinc-700 px-4 py-3">
-          <p className="text-xs text-zinc-500">
+        <div className="flex items-center justify-between border-t border-line px-4 py-3">
+          <p className="text-xs text-ink-3">
             {busy
               ? `Encoding ${busy.done} / ${busy.total}…`
               : cleanNote
@@ -1164,11 +1165,11 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
               : "Interior lines only — the outer edges are fixed."}
           </p>
           <div className="flex gap-2">
-            <button onClick={onCancel} disabled={!!busy} className="rounded bg-zinc-700 px-4 py-2 hover:bg-zinc-600 disabled:opacity-40">
+            <button onClick={onCancel} disabled={!!busy} className="rounded-ctrl bg-ctrl-hi px-4 py-2 hoverable disabled:opacity-40">
               Cancel
             </button>
             <button onClick={handleApply} disabled={!valid || !!busy}
-              className="rounded bg-violet-600 px-4 py-2 font-medium hover:bg-violet-500 disabled:opacity-40">
+              className="rounded-ctrl bg-primary text-on-primary px-4 py-2 font-semibold hoverable disabled:opacity-40">
               {busy ? `${Math.round((busy.done / busy.total) * 100)}%` : `Apply → ${frameCount} frames`}
             </button>
           </div>
@@ -1179,10 +1180,10 @@ export default function SpriteSheetCutter({ source, onCancel, onSliced }: Props)
 }
 
 function SeamBadge({ label, v }: { label: string; v: { clean: number; total: number } | null }) {
-  if (!v) return <span className="text-zinc-600">{label} —</span>;
+  if (!v) return <span className="text-ink-dim">{label} —</span>;
   const all = v.clean === v.total;
   return (
-    <span className={all ? "text-emerald-400" : "text-amber-400"}>
+    <span className={all ? "text-success" : "text-warn"}>
       {label} {v.clean}/{v.total}
     </span>
   );

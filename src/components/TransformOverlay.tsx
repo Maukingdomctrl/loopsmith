@@ -10,6 +10,7 @@
  */
 
 import { useMemo } from "react";
+import { overlay } from "@/styles/tokens";
 import type { Layer, LayerSelection } from "@/types/layer";
 import type { Vec2 } from "@/types/geometry";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
@@ -89,7 +90,7 @@ export default function TransformOverlay({
       className="pointer-events-none absolute inset-0 z-[60]"
     >
       {secondary.map((q, i) => (
-        <polygon key={i} points={pts(q)} fill="none" stroke="#6366F1" strokeWidth={1} strokeDasharray="4 4" opacity={0.6} />
+        <polygon key={i} points={pts(q)} fill="none" stroke={overlay.line} strokeWidth={1} strokeDasharray="4 4" opacity={0.6} />
       ))}
 
       {straightenLine && (
@@ -97,25 +98,25 @@ export default function TransformOverlay({
           <line
             x1={straightenLine.from.x} y1={straightenLine.from.y}
             x2={straightenLine.to.x} y2={straightenLine.to.y}
-            stroke="#22D3EE" strokeWidth={2} strokeDasharray="6 4"
+            stroke={overlay.active} strokeWidth={2} strokeDasharray="6 4"
           />
-          <circle cx={straightenLine.from.x} cy={straightenLine.from.y} r={4} fill="#22D3EE" />
+          <circle cx={straightenLine.from.x} cy={straightenLine.from.y} r={4} fill={overlay.active} />
         </>
       )}
 
       {geometry && (
         <>
-          <polygon points={pts(geometry.quad)} fill="none" stroke="#6366F1" strokeWidth={1.5} />
+          <polygon points={pts(geometry.quad)} fill="none" stroke={overlay.line} strokeWidth={1.5} />
 
           <line
             x1={geometry.top.x} y1={geometry.top.y}
             x2={geometry.rotate.x} y2={geometry.rotate.y}
-            stroke="#6366F1" strokeWidth={1.5}
+            stroke={overlay.line} strokeWidth={1.5}
           />
           <circle
             cx={geometry.rotate.x} cy={geometry.rotate.y} r={HANDLE_RADIUS}
-            fill={activeHandle === "rotate" ? "#22D3EE" : "#0F1117"}
-            stroke="#6366F1" strokeWidth={2}
+            fill={activeHandle === "rotate" ? overlay.active : overlay.handleFill}
+            stroke={overlay.line} strokeWidth={2}
           />
 
           {geometry.handles.map((h) => (
@@ -123,8 +124,8 @@ export default function TransformOverlay({
               key={h.id}
               x={h.p.x - HANDLE_RADIUS} y={h.p.y - HANDLE_RADIUS}
               width={HANDLE_RADIUS * 2} height={HANDLE_RADIUS * 2}
-              fill={activeHandle === h.id ? "#22D3EE" : "#FFFFFF"}
-              stroke="#6366F1" strokeWidth={1.5} rx={1.5}
+              fill={activeHandle === h.id ? overlay.active : overlay.handle}
+              stroke={overlay.line} strokeWidth={1.5} rx={1.5}
             />
           ))}
 
@@ -132,11 +133,11 @@ export default function TransformOverlay({
           <g opacity={primary?.locked ? 0.4 : 1}>
             <circle
               cx={geometry.pivot.x} cy={geometry.pivot.y} r={HANDLE_RADIUS - 1}
-              fill={activeHandle === "pivot" ? "#F59E0B" : "none"}
-              stroke="#F59E0B" strokeWidth={2}
+              fill={activeHandle === "pivot" ? overlay.pivot : "none"}
+              stroke={overlay.pivot} strokeWidth={2}
             />
-            <line x1={geometry.pivot.x - 10} y1={geometry.pivot.y} x2={geometry.pivot.x + 10} y2={geometry.pivot.y} stroke="#F59E0B" strokeWidth={1} />
-            <line x1={geometry.pivot.x} y1={geometry.pivot.y - 10} x2={geometry.pivot.x} y2={geometry.pivot.y + 10} stroke="#F59E0B" strokeWidth={1} />
+            <line x1={geometry.pivot.x - 10} y1={geometry.pivot.y} x2={geometry.pivot.x + 10} y2={geometry.pivot.y} stroke={overlay.pivot} strokeWidth={1} />
+            <line x1={geometry.pivot.x} y1={geometry.pivot.y - 10} x2={geometry.pivot.x} y2={geometry.pivot.y + 10} stroke={overlay.pivot} strokeWidth={1} />
           </g>
         </>
       )}

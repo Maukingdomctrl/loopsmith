@@ -6,6 +6,7 @@
  */
 
 import { Check, X } from "lucide-react";
+import { overlay } from "@/styles/tokens";
 import type { DocumentCropDraft } from "@/lib/layers/crop";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
 import { HANDLE_ANCHORS, type HandleId } from "@/lib/geometry/hitTest";
@@ -36,13 +37,13 @@ export default function CropOverlay({ draft, activeHandle, onAspect, onCommit, o
       <svg width={CANVAS_SIZE} height={CANVAS_SIZE} className="pointer-events-none absolute inset-0 z-[70]">
         <path
           d={`M0,0 H${CANVAS_SIZE} V${CANVAS_SIZE} H0 Z M${r.x},${r.y} H${r.x + r.w} V${r.y + r.h} H${r.x} Z`}
-          fill="rgba(0,0,0,0.6)" fillRule="evenodd"
+          fill={overlay.scrim} fillRule="evenodd"
         />
-        <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none" stroke="#22D3EE" strokeWidth={1.5} />
+        <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none" stroke={overlay.line} strokeWidth={1.5} />
 
         {/* Rule-of-thirds guides. */}
         {[1, 2].map((i) => (
-          <g key={i} stroke="#22D3EE" strokeWidth={0.5} opacity={0.5}>
+          <g key={i} stroke={overlay.line} strokeWidth={0.5} opacity={0.5}>
             <line x1={r.x + (r.w * i) / 3} y1={r.y} x2={r.x + (r.w * i) / 3} y2={r.y + r.h} />
             <line x1={r.x} y1={r.y + (r.h * i) / 3} x2={r.x + r.w} y2={r.y + (r.h * i) / 3} />
           </g>
@@ -57,32 +58,32 @@ export default function CropOverlay({ draft, activeHandle, onAspect, onCommit, o
               key={id}
               x={cx - HANDLE_RADIUS} y={cy - HANDLE_RADIUS}
               width={HANDLE_RADIUS * 2} height={HANDLE_RADIUS * 2}
-              fill={activeHandle === id ? "#22D3EE" : "#FFFFFF"}
-              stroke="#0891B2" strokeWidth={1.5}
+              fill={activeHandle === id ? overlay.active : overlay.handle}
+              stroke={overlay.line} strokeWidth={1.5}
             />
           );
         })}
       </svg>
 
-      <div className="absolute bottom-3 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-2 rounded-xl bg-black/85 p-2">
+      <div className="absolute bottom-3 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-2 rounded-panel bg-panel p-2">
         <div className="flex gap-1">
           {ASPECTS.map((a) => (
             <button
               key={a.label}
               onClick={() => onAspect(a.value)}
-              className={`rounded px-2 py-1 text-[10px] ${
-                draft.aspect === a.value ? "bg-cyan-600 text-white" : "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
+              className={`rounded-ctrl px-2 py-1 text-[11px] ${
+                draft.aspect === a.value ? "selected text-icon-on" : "bg-ctrl text-ink hoverable"
               }`}
             >{a.label}</button>
           ))}
         </div>
-        <span className="px-1 text-[10px] text-zinc-400">
+        <span className="px-1 text-[11px] text-ink-2">
           {Math.round(r.w)} × {Math.round(r.h)}
         </span>
         <button onClick={() => onCommit(true)} title="Apply crop (Enter)"
-          className="flex h-8 w-8 items-center justify-center rounded bg-emerald-600 text-white hover:bg-emerald-500"><Check size={15} /></button>
+          className="flex h-8 w-8 items-center justify-center rounded-ctrl bg-primary text-on-primary hoverable"><Check size={15} /></button>
         <button onClick={onCancel} title="Cancel (Esc)"
-          className="flex h-8 w-8 items-center justify-center rounded bg-red-600 text-white hover:bg-red-500"><X size={15} /></button>
+          className="flex h-8 w-8 items-center justify-center rounded-ctrl border border-danger-line bg-danger-bg text-danger-strong hoverable"><X size={15} /></button>
       </div>
     </>
   );
