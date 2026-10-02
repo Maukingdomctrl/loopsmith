@@ -16,6 +16,7 @@ import type { Adjustment, AdjustmentType, BlendMode, ColorBalanceTone, Layer, La
 import { ADJUSTMENT_LABELS, BLEND_LABELS, BLEND_MODES } from "@/types/layer";
 import type { LayerAction } from "@/lib/layers/editor";
 import { BLANK_LAYER_SIZE, MAX_LAYERS_PER_FRAME } from "@/lib/layers/constants";
+import { maskTone, rangeFill } from "@/styles/tokens";
 
 interface Props {
   layers: readonly Layer[];
@@ -78,12 +79,12 @@ export default function LayerPanel({
   const primaryLayer = layers.find((l) => l.id === primary) ?? null;
 
   return (
-    <aside className="flex w-60 flex-col border-l border-white/10 bg-[#10131A]">
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
+    <aside className="flex w-60 flex-col border-l border-line bg-panel">
+      <div className="flex items-center justify-between border-b border-line px-3 py-2">
+        <div className="flex items-center gap-2 text-xs font-medium text-ink">
           <LayersIcon size={14} />
           Layers
-          <span className="text-zinc-500">
+          <span className="text-ink-3">
             {layers.length}/{MAX_LAYERS_PER_FRAME}
           </span>
         </div>
@@ -94,7 +95,7 @@ export default function LayerPanel({
             }
             disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
             title="New blank layer to paint on"
-            className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+            className="rounded-ctrl p-1 text-ink hoverable disabled:opacity-30"
           >
             <Plus size={14} />
           </button>
@@ -103,7 +104,7 @@ export default function LayerPanel({
               onClick={onAddBlankAllFrames}
               disabled={disabled}
               title="New blank layer on every frame"
-              className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+              className="rounded-ctrl p-1 text-ink hoverable disabled:opacity-30"
             >
               <CopyPlus size={14} />
             </button>
@@ -112,7 +113,7 @@ export default function LayerPanel({
             onClick={onAddImage}
             disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
             title="Add layer from image"
-            className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+            className="rounded-ctrl p-1 text-ink hoverable disabled:opacity-30"
           >
             <ImagePlus size={14} />
           </button>
@@ -122,17 +123,17 @@ export default function LayerPanel({
                 onClick={() => setAdjustMenu((v) => !v)}
                 disabled={disabled}
                 title="New adjustment layer"
-                className="rounded p-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+                className="rounded-ctrl p-1 text-ink hoverable disabled:opacity-30"
               >
                 <SlidersHorizontal size={14} />
               </button>
               {adjustMenu && (
-                <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded border border-white/10 bg-zinc-900 py-1 shadow-lg">
+                <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-ctrl border border-line bg-panel py-1 shadow-panel">
                   {ADJUSTMENT_TYPES.map((t) => (
                     <button
                       key={t}
                       onClick={() => { setAdjustMenu(false); onAddAdjustment(t); }}
-                      className="block w-full px-3 py-1 text-left text-xs text-zinc-200 hover:bg-zinc-700"
+                      className="block w-full px-3 py-1 text-left text-xs text-ink hoverable"
                     >
                       {ADJUSTMENT_LABELS[t]}
                     </button>
@@ -163,9 +164,9 @@ export default function LayerPanel({
                 );
                 onEditMaskChange?.(false);
               }}
-              className={`flex cursor-pointer items-center gap-2 border-b border-white/5 px-2 py-1.5 text-xs ${
-                isSelected ? "bg-indigo-500/20" : "hover:bg-zinc-800/60"
-              } ${primary === layer.id ? "ring-1 ring-inset ring-indigo-400" : ""}`}
+              className={`flex cursor-pointer items-center gap-2 border-b border-line px-2 py-1.5 text-xs ${
+                isSelected ? "selected" : "hoverable"
+              } ${primary === layer.id ? "ring-1 ring-inset ring-select-line" : ""}`}
             >
               <button
                 onClick={(e) => {
@@ -174,23 +175,23 @@ export default function LayerPanel({
                 }}
                 disabled={disabled}
                 title={layer.visible ? "Hide" : "Show"}
-                className="text-zinc-400 hover:text-white disabled:opacity-30"
+                className="text-ink-2 hover:text-ink disabled:opacity-30"
               >
                 {layer.visible ? <Eye size={13} /> : <EyeOff size={13} />}
               </button>
 
               {layer.clip && (
-                <span title="Clipped to the layer below" className="-mr-1 text-zinc-400">
+                <span title="Clipped to the layer below" className="-mr-1 text-ink-2">
                   <CornerLeftDown size={12} />
                 </span>
               )}
               <div
-                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded border bg-[#1b1f28] ${
-                  layer.mask && primary === layer.id && !editMask ? "border-white" : "border-zinc-700"
+                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-ctrl border bg-ctrl ${
+                  layer.mask && primary === layer.id && !editMask ? "border-ink" : "border-line"
                 }`}
               >
                 {layer.adjust ? (
-                  <SlidersHorizontal size={14} className="text-zinc-400" />
+                  <SlidersHorizontal size={14} className="text-ink-2" />
                 ) : (
                   layer.image && (
                     <img src={layer.image} alt="" className="h-full w-full object-contain" />
@@ -206,12 +207,12 @@ export default function LayerPanel({
                   }}
                   disabled={disabled}
                   title="Layer mask: click to paint on it (white shows, black hides)"
-                  className={`relative -ml-1 h-8 w-8 flex-shrink-0 overflow-hidden rounded border ${
-                    primary === layer.id && editMask ? "border-white" : "border-zinc-700"
+                  className={`relative -ml-1 h-8 w-8 flex-shrink-0 overflow-hidden rounded-ctrl border ${
+                    primary === layer.id && editMask ? "border-ink" : "border-line"
                   }`}
                   style={{
                     background:
-                      (layer.mask.fill === 255) !== layer.mask.inverted ? "#ffffff" : "#000000",
+                      (layer.mask.fill === 255) !== layer.mask.inverted ? maskTone.show : maskTone.hide,
                   }}
                 >
                   {layer.mask.image && (
@@ -223,7 +224,7 @@ export default function LayerPanel({
                     />
                   )}
                   {!layer.mask.enabled && (
-                    <X size={30} className="absolute inset-0 m-auto text-red-500" />
+                    <X size={30} className="absolute inset-0 m-auto text-danger" />
                   )}
                 </button>
               )}
@@ -240,7 +241,7 @@ export default function LayerPanel({
                       if (e.key === "Escape") { setRenamingId(null); setDraft(""); }
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-full rounded bg-zinc-900 px-1 text-xs text-white outline-none"
+                    className="w-full rounded-ctrl bg-panel px-1 text-xs text-ink outline-none"
                   />
                 ) : (
                   <div
@@ -249,14 +250,14 @@ export default function LayerPanel({
                       setRenamingId(layer.id);
                       setDraft(layer.name);
                     }}
-                    className="truncate text-zinc-200"
+                    className="truncate text-ink"
                     title={layer.name}
                   >
                     {layer.name}
-                    {isBase && <span className="ml-1 text-[9px] text-cyan-400">BASE</span>}
+                    {isBase && <span className="ml-1 text-[11px] text-ink-3">Base</span>}
                   </div>
                 )}
-                <div className="text-[9px] text-zinc-500">
+                <div className="text-[11px] text-ink-3">
                   {Math.round(layer.opacity * 100)}%
                   {layer.blend !== "normal" && ` · ${BLEND_LABELS[layer.blend] ?? layer.blend}`}
                   {layer.alphaLock && " · alpha lock"}
@@ -271,7 +272,7 @@ export default function LayerPanel({
                 }}
                 disabled={disabled}
                 title={layer.locked ? "Unlock" : "Lock"}
-                className={`${layer.locked ? "text-amber-400" : "text-zinc-500"} hover:text-white disabled:opacity-30`}
+                className={`${layer.locked ? "text-warn" : "text-ink-3"} hover:text-ink disabled:opacity-30`}
               >
                 {layer.locked ? <Lock size={13} /> : <Unlock size={13} />}
               </button>
@@ -282,8 +283,8 @@ export default function LayerPanel({
 
       {/* Per-layer properties for the primary selection. */}
       {primaryLayer && (
-        <div className="space-y-2 border-t border-white/10 p-3">
-          <label className="block text-[10px] text-zinc-400">
+        <div className="space-y-2 border-t border-line p-3">
+          <label className="block text-[11px] text-ink-2">
             Opacity — {Math.round(primaryLayer.opacity * 100)}%
             <input
               type="range" min={0} max={100} step={1}
@@ -298,8 +299,9 @@ export default function LayerPanel({
                   value: Number(e.target.value) / 100,
                 })
               }
-              className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
-            />
+              className="mt-1 w-full  disabled:opacity-40"
+        style={rangeFill(Math.round(primaryLayer.opacity * 100), 0, 100)}
+      />
           </label>
 
           {primaryLayer.adjust && (
@@ -312,7 +314,7 @@ export default function LayerPanel({
           )}
 
           {!primaryLayer.adjust && (
-          <label className="block text-[10px] text-zinc-400">
+          <label className="block text-[11px] text-ink-2">
             Blend
             <select
               value={primaryLayer.blend}
@@ -324,7 +326,7 @@ export default function LayerPanel({
                   value: e.target.value as BlendMode,
                 })
               }
-              className="mt-1 w-full rounded bg-zinc-800 px-1 py-1 text-xs text-white outline-none disabled:opacity-40"
+              className="mt-1 w-full rounded-ctrl bg-ctrl px-1 py-1 text-xs text-ink outline-none disabled:opacity-40"
             >
               {BLEND_MODES.map((m) => (
                 <option key={m} value={m}>{BLEND_LABELS[m]}</option>
@@ -340,10 +342,10 @@ export default function LayerPanel({
               }
               disabled={disabled || primaryLayer.locked}
               title="Clipping mask: show this layer only where the layer below has pixels"
-              className={`flex w-full items-center gap-2 rounded px-2 py-1 text-[10px] disabled:opacity-40 ${
+              className={`flex w-full items-center gap-2 rounded-ctrl px-2 py-1 text-[11px] disabled:opacity-40 ${
                 primaryLayer.clip
-                  ? "bg-indigo-500/30 text-white"
-                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                  ? "selected text-ink"
+                  : "bg-ctrl text-ink-2 hoverable"
               }`}
             >
               <CornerLeftDown size={12} />
@@ -362,10 +364,10 @@ export default function LayerPanel({
             }
             disabled={disabled || primaryLayer.locked}
             title="Lock transparent pixels: paint only where this layer already has pixels"
-            className={`flex w-full items-center gap-2 rounded px-2 py-1 text-[10px] disabled:opacity-40 ${
+            className={`flex w-full items-center gap-2 rounded-ctrl px-2 py-1 text-[11px] disabled:opacity-40 ${
               primaryLayer.alphaLock
-                ? "bg-indigo-500/30 text-white"
-                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                ? "selected text-ink"
+                : "bg-ctrl text-ink-2 hoverable"
             }`}
           >
             <Grid2x2Check size={12} />
@@ -380,13 +382,13 @@ export default function LayerPanel({
               }
               disabled={disabled || primaryLayer.locked}
               title="Add layer mask (Alt-click: a mask that hides everything)"
-              className="flex w-full items-center gap-2 rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-700 disabled:opacity-40"
+              className="flex w-full items-center gap-2 rounded-ctrl bg-ctrl px-2 py-1 text-[11px] text-ink-2 hoverable disabled:opacity-40"
             >
               <RectangleCircle size={12} />
               Add mask
             </button>
           ) : (
-            <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+            <div className="flex items-center gap-1 text-[11px] text-ink-2">
               <RectangleCircle size={12} />
               <span className="flex-1">Mask</span>
               <button
@@ -395,7 +397,7 @@ export default function LayerPanel({
                 }
                 disabled={disabled || primaryLayer.locked}
                 title="Invert mask (Ctrl+I)"
-                className="rounded bg-zinc-800 p-1 hover:bg-zinc-700 disabled:opacity-40"
+                className="rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-40"
               ><Contrast size={12} /></button>
               <button
                 onClick={() =>
@@ -403,8 +405,8 @@ export default function LayerPanel({
                 }
                 disabled={disabled || primaryLayer.locked}
                 title={primaryLayer.mask.enabled ? "Turn mask off" : "Turn mask on"}
-                className={`rounded p-1 disabled:opacity-40 ${
-                  primaryLayer.mask.enabled ? "bg-zinc-800 hover:bg-zinc-700" : "bg-red-900/60 text-white"
+                className={`rounded-ctrl p-1 disabled:opacity-40 ${
+                  primaryLayer.mask.enabled ? "bg-ctrl hoverable" : "bg-danger-bg text-danger-strong"
                 }`}
               >{primaryLayer.mask.enabled ? <Eye size={12} /> : <EyeOff size={12} />}</button>
               {onApplyMask && !primaryLayer.adjust && (
@@ -416,14 +418,14 @@ export default function LayerPanel({
                       ? "Apply mask: bake it into the layer's pixels"
                       : "Turn the mask on to apply it"
                   }
-                  className="rounded bg-zinc-800 p-1 hover:bg-zinc-700 disabled:opacity-40"
+                  className="rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-40"
                 ><Check size={12} /></button>
               )}
               <button
                 onClick={() => dispatch({ type: "layer/maskDelete", id: primaryLayer.id })}
                 disabled={disabled || primaryLayer.locked}
                 title="Delete mask"
-                className="rounded bg-zinc-800 p-1 hover:bg-red-700 disabled:opacity-40"
+                className="rounded-ctrl bg-ctrl p-1 hover:bg-danger-bg hover:text-danger-strong disabled:opacity-40"
               ><Trash2 size={12} /></button>
             </div>
           )}
@@ -432,19 +434,19 @@ export default function LayerPanel({
             <button
               onClick={() => dispatch({ type: "layer/raise", id: primaryLayer.id })}
               disabled={disabled || primaryLayer.kind === "base"}
-              className="flex-1 rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"
+              className="flex-1 rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-30"
               title="Raise"
             ><ChevronUp size={13} className="mx-auto" /></button>
             <button
               onClick={() => dispatch({ type: "layer/lower", id: primaryLayer.id })}
               disabled={disabled || primaryLayer.kind === "base"}
-              className="flex-1 rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"
+              className="flex-1 rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-30"
               title="Lower"
             ><ChevronDown size={13} className="mx-auto" /></button>
             <button
               onClick={() => dispatch({ type: "layer/duplicate", id: primaryLayer.id })}
               disabled={disabled || layers.length >= MAX_LAYERS_PER_FRAME}
-              className="flex-1 rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"
+              className="flex-1 rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-30"
               title="Duplicate"
             ><Copy size={13} className="mx-auto" /></button>
             <button
@@ -453,7 +455,7 @@ export default function LayerPanel({
               // removeLayer, because keyboard Delete does not pass through here.
               disabled={disabled || primaryLayer.kind === "base"}
               title={primaryLayer.kind === "base" ? "The base layer cannot be deleted" : "Delete layer"}
-              className="flex-1 rounded bg-red-700/80 p-1 hover:bg-red-600 disabled:opacity-30"
+              className="flex-1 rounded-ctrl border border-danger-line bg-danger-bg p-1 text-danger-strong hoverable disabled:opacity-30"
             ><Trash2 size={13} className="mx-auto" /></button>
           </div>
         </div>
@@ -480,10 +482,10 @@ function Slider({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="block text-[10px] text-zinc-400">
+    <label className="block text-[11px] text-ink-2">
       <span className="flex justify-between">
         <span>{label}</span>
-        <span className="text-zinc-300">{value > 0 ? `+${value}` : value}</span>
+        <span className="text-ink">{value > 0 ? `+${value}` : value}</span>
       </span>
       <input
         type="range" min={min} max={max} step={1}
@@ -493,7 +495,8 @@ function Slider({
         onKeyDown={(e) => { if (movesSlider(e.key)) onBegin(); }}
         onDoubleClick={() => { onBegin(); onChange(0); }}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-indigo-500 disabled:opacity-40"
+        className="w-full  disabled:opacity-40"
+        style={rangeFill(value, min, max)}
       />
     </label>
   );
@@ -546,8 +549,8 @@ function AdjustmentControls({
           <button
             key={t}
             onClick={() => setTone(t)}
-            className={`flex-1 rounded py-0.5 text-[10px] capitalize ${
-              tone === t ? "bg-indigo-500/30 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+            className={`flex-1 rounded-ctrl py-0.5 text-[11px] capitalize ${
+              tone === t ? "selected text-ink" : "bg-ctrl text-ink-2 hoverable"
             }`}
           >
             {t}

@@ -1474,7 +1474,7 @@ const deleteProject = useCallback(
   [activeProjectId, stabilizer]
 );  
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-[#0F1117] text-white">
+    <main className="flex h-screen flex-col overflow-hidden bg-ws text-ink">
       <Toolbar
         isPlaying={isPlaying}
         saveStatus={saveStatus}
@@ -1495,13 +1495,13 @@ const deleteProject = useCallback(
       />
 
       <section className="flex min-h-0 flex-1">
-        <div className="flex shrink-0 border-r border-white/10 bg-[#11151D]">
+        <div className="flex shrink-0 border-r border-line bg-panel">
           <button
             onClick={() => setShowProjects((v) => !v)}
             title={showProjects ? "Hide projects" : "Show projects"}
             aria-label="Toggle projects"
             className={`flex w-12 flex-col items-center gap-1 pt-4 text-xs ${
-              showProjects ? "text-white" : "text-zinc-400 hover:text-white"
+              showProjects ? "text-ink" : "text-ink-2 hover:text-ink"
             }`}
           >
             <FolderOpen size={20} />
@@ -1615,9 +1615,9 @@ const deleteProject = useCallback(
           transparency={transparency}
           onTransparencyChange={patch}
         >
-                    <details className="border-t border-white/10">
-            <summary className="cursor-pointer select-none list-none p-3 text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
-              ▸ TRANSFORM
+                    <details>
+            <summary className="cursor-pointer select-none list-none py-3 text-[14px] font-medium text-ink hoverable">
+              Transform
             </summary>
 
           <TransformPanel
@@ -1628,9 +1628,9 @@ const deleteProject = useCallback(
             onCropTool={() => editor.beginCrop()}
           />
                     </details>
-          <details className="border-t border-white/10">
-            <summary className="cursor-pointer select-none list-none p-3 text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
-              ▸ SQUASH &amp; STRETCH
+          <details>
+            <summary className="cursor-pointer select-none list-none py-3 text-[14px] font-medium text-ink hoverable">
+              Squash and stretch
             </summary>
             <SquashPanel
               layer={

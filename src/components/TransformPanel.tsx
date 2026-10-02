@@ -18,6 +18,7 @@ import { normalizeAngle, parseAngleInput } from "@/lib/geometry/angle";
 import { fitScale, CANVAS_SIZE } from "@/lib/frameTransform";
 import { roundTo } from "@/lib/geometry/scalar";
 import { ROTATE_STEP, ROTATE_STEP_FINE, ROTATE_SNAP_STEP } from "@/lib/layers/constants";
+import { rangeFill } from "@/styles/tokens";
 
 interface Props {
   layer: Layer | null;
@@ -145,16 +146,16 @@ export default function TransformPanel({
   const rotation = layer?.pose.rotation ?? 0;
 
   return (
-    <div className="space-y-3 border-t border-white/10 p-3 text-xs">
-      <div className="flex items-center justify-between text-[10px] font-medium tracking-wide text-zinc-400">
-        TRANSFORM
-        {layer && <span className="text-zinc-500">{layer.name}</span>}
+    <div className="space-y-4 pb-4 text-xs">
+      <div className="flex items-center justify-between section-title">
+        Layer
+        {layer && <span className="text-ink-3">{layer.name}</span>}
       </div>
 
       {/* Position */}
       <div className="grid grid-cols-2 gap-2">
         {(["x", "y"] as const).map((f) => (
-          <label key={f} className="text-[10px] text-zinc-400">
+          <label key={f} className="text-[11px] text-ink-2">
             {f.toUpperCase()}
             <input
               value={drafts[f]}
@@ -163,14 +164,14 @@ export default function TransformPanel({
               onChange={(e) => setDrafts((d) => ({ ...d, [f]: e.target.value }))}
               onBlur={() => commitField(f)}
               onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-              className="mt-0.5 w-full rounded bg-zinc-800 px-1.5 py-1 text-white outline-none disabled:opacity-40"
+              className="mt-0.5 w-full rounded-ctrl bg-ctrl px-1.5 py-1 text-ink outline-none disabled:opacity-40"
             />
           </label>
         ))}
       </div>
 
       {/* Scale */}
-      <label className="block text-[10px] text-zinc-400">
+      <label className="block text-[11px] text-ink-2">
         Scale %
         <div className="mt-0.5 flex gap-1">
           <input
@@ -180,13 +181,13 @@ export default function TransformPanel({
             onChange={(e) => setDrafts((d) => ({ ...d, zoom: e.target.value }))}
             onBlur={() => commitField("zoom")}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            className="w-full rounded bg-zinc-800 px-1.5 py-1 text-white outline-none disabled:opacity-40"
+            className="w-full rounded-ctrl bg-ctrl px-1.5 py-1 text-ink outline-none disabled:opacity-40"
           />
           <button
             onClick={() => layer && dispatch({ type: "xf/fit", id: layer.id })}
             disabled={locked}
             title="Fit to canvas"
-            className="rounded bg-zinc-700 px-2 hover:bg-zinc-600 disabled:opacity-30"
+            className="rounded-ctrl bg-ctrl px-2 hoverable disabled:opacity-30"
           ><Maximize2 size={13} /></button>
         </div>
         <input
@@ -202,8 +203,9 @@ export default function TransformPanel({
               baseScale,
             })
           }
-          className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
-        />
+          className="mt-1 w-full  disabled:opacity-40"
+        style={rangeFill(Math.round(zoom * 100), 5, 400)}
+      />
       </label>
 
       {/* Rotation: dial + 0–360 field, both driving setLayerRotation */}
@@ -214,21 +216,21 @@ export default function TransformPanel({
           onPointerMove={onDialMove}
           onPointerUp={onDialUp}
           onPointerCancel={onDialUp}
-          className={`relative h-14 w-14 flex-shrink-0 rounded-full border border-zinc-600 bg-[#1b1f28] ${
+          className={`relative h-14 w-14 flex-shrink-0 rounded-full border border-line-strong bg-ctrl ${
             locked ? "opacity-40" : "cursor-grab active:cursor-grabbing"
           }`}
           style={{ touchAction: "none" }}
           title="Drag to rotate · Shift snaps to 15°"
         >
           <div
-            className="absolute left-1/2 top-1/2 h-5 w-0.5 origin-bottom -translate-x-1/2 -translate-y-full bg-cyan-400"
+            className="absolute left-1/2 top-1/2 h-5 w-0.5 origin-bottom -translate-x-1/2 -translate-y-full bg-accent"
             style={{ transform: `translate(-50%, -100%) rotate(${rotation}deg)`, transformOrigin: "bottom center" }}
           />
-          <div className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-300" />
+          <div className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-hi" />
         </div>
 
         <div className="flex-1 space-y-1">
-          <label className="block text-[10px] text-zinc-400">
+          <label className="block text-[11px] text-ink-2">
             Rotation (0–360°)
             <input
               value={drafts.rot}
@@ -237,29 +239,29 @@ export default function TransformPanel({
               onChange={(e) => setDrafts((d) => ({ ...d, rot: e.target.value }))}
               onBlur={() => commitField("rot")}
               onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-              className="mt-0.5 w-full rounded bg-zinc-800 px-1.5 py-1 text-white outline-none disabled:opacity-40"
+              className="mt-0.5 w-full rounded-ctrl bg-ctrl px-1.5 py-1 text-ink outline-none disabled:opacity-40"
             />
           </label>
           <div className="flex gap-1">
             <button onClick={() => bump(-ROTATE_STEP)} disabled={locked}
-              className="flex-1 rounded bg-zinc-700 py-0.5 hover:bg-zinc-600 disabled:opacity-30">−1°</button>
+              className="flex-1 rounded-ctrl bg-ctrl py-0.5 hoverable disabled:opacity-30">−1°</button>
             <button onClick={() => bump(-ROTATE_STEP_FINE)} disabled={locked}
-              className="flex-1 rounded bg-zinc-700 py-0.5 hover:bg-zinc-600 disabled:opacity-30">−.1</button>
+              className="flex-1 rounded-ctrl bg-ctrl py-0.5 hoverable disabled:opacity-30">−.1</button>
             <button onClick={() => bump(ROTATE_STEP_FINE)} disabled={locked}
-              className="flex-1 rounded bg-zinc-700 py-0.5 hover:bg-zinc-600 disabled:opacity-30">+.1</button>
+              className="flex-1 rounded-ctrl bg-ctrl py-0.5 hoverable disabled:opacity-30">+.1</button>
             <button onClick={() => bump(ROTATE_STEP)} disabled={locked}
-              className="flex-1 rounded bg-zinc-700 py-0.5 hover:bg-zinc-600 disabled:opacity-30">+1°</button>
+              className="flex-1 rounded-ctrl bg-ctrl py-0.5 hoverable disabled:opacity-30">+1°</button>
           </div>
           <div className="flex gap-1">
             <button onClick={() => bump(-90)} disabled={locked}
-              className="flex-1 rounded bg-zinc-700 py-0.5 hover:bg-zinc-600 disabled:opacity-30">−90°</button>
+              className="flex-1 rounded-ctrl bg-ctrl py-0.5 hoverable disabled:opacity-30">−90°</button>
             <button onClick={() => bump(90)} disabled={locked}
-              className="flex-1 rounded bg-zinc-700 py-0.5 hover:bg-zinc-600 disabled:opacity-30">+90°</button>
+              className="flex-1 rounded-ctrl bg-ctrl py-0.5 hoverable disabled:opacity-30">+90°</button>
             <button
               onClick={onStraightenTool}
               disabled={locked}
               title="Draw a line that should be horizontal"
-              className="flex-1 rounded bg-cyan-700 py-0.5 hover:bg-cyan-600 disabled:opacity-30"
+              className="flex-1 rounded-ctrl bg-ctrl py-0.5 hoverable disabled:opacity-30"
             ><Ruler size={12} className="mx-auto" /></button>
           </div>
         </div>
@@ -267,9 +269,9 @@ export default function TransformPanel({
 
       {/* Pivot */}
       <div>
-        <div className="mb-1 flex items-center gap-1 text-[10px] text-zinc-400">
+        <div className="mb-1 flex items-center gap-1 text-[11px] text-ink-2">
           <Crosshair size={11} /> Pivot
-          <span className="ml-auto text-zinc-500">
+          <span className="ml-auto text-ink-3">
             {layer ? `${roundTo(layer.pose.pivot.x, 1)}, ${roundTo(layer.pose.pivot.y, 1)}` : "—"}
           </span>
         </div>
@@ -280,7 +282,7 @@ export default function TransformPanel({
               key={p.label}
               onClick={() => layer && dispatch({ type: "xf/pivotAnchor", id: layer.id, anchor: p.anchor })}
               disabled={locked}
-              className="rounded bg-zinc-800 py-1 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+              className="rounded-ctrl bg-ctrl py-1 text-ink hoverable disabled:opacity-30"
             >{p.label}</button>
           ))}
         </div>
@@ -290,15 +292,15 @@ export default function TransformPanel({
       <div className="grid grid-cols-4 gap-1">
         <button onClick={() => layer && dispatch({ type: "xf/flip", id: layer.id, axis: "x" })}
           disabled={locked} title="Flip horizontally"
-          className="rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"><FlipHorizontal2 size={13} className="mx-auto" /></button>
+          className="rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-30"><FlipHorizontal2 size={13} className="mx-auto" /></button>
         <button onClick={() => layer && dispatch({ type: "xf/flip", id: layer.id, axis: "y" })}
           disabled={locked} title="Flip vertically"
-          className="rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"><FlipVertical2 size={13} className="mx-auto" /></button>
+          className="rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-30"><FlipVertical2 size={13} className="mx-auto" /></button>
         <button onClick={onCropTool} disabled={disabled} title="Crop"
-          className="rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"><AlignCenter size={13} className="mx-auto" /></button>
+          className="rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-30"><AlignCenter size={13} className="mx-auto" /></button>
         <button onClick={() => layer && dispatch({ type: "xf/reset", id: layer.id })}
           disabled={locked} title="Reset transform"
-          className="rounded bg-zinc-700 p-1 hover:bg-zinc-600 disabled:opacity-30"><RotateCcw size={13} className="mx-auto" /></button>
+          className="rounded-ctrl bg-ctrl p-1 hoverable disabled:opacity-30"><RotateCcw size={13} className="mx-auto" /></button>
       </div>
     </div>
   );

@@ -72,7 +72,7 @@ export default function Timeline({
   background,
 }: TimelineProps) {
   const actionClass =
-    "flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white";
+    "flex h-7 items-center gap-1.5 rounded-ctrl px-2 text-xs text-ink hoverable hover:text-ink";
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewWidth, setViewWidth] = useState(0);
@@ -220,7 +220,7 @@ export default function Timeline({
   return (
     <footer
       tabIndex={0}
-      className="flex h-28 shrink-0 flex-col border-t border-white/10 bg-[#10131A] px-5 py-2 outline-none"
+      className="flex h-28 shrink-0 flex-col border-t border-line bg-panel px-5 py-2 outline-none"
       onKeyDown={(e) => {
         // Only while the timeline has focus, so the canvas's own Delete is untouched.
         if (e.key === "Delete" || e.key === "Backspace") {
@@ -238,13 +238,13 @@ export default function Timeline({
     >
       <div className="mb-1 flex h-7 shrink-0 items-center justify-between">
         <div className="flex items-center gap-2">
-          <p className="text-sm text-zinc-400">Timeline ({frames.length} frames)</p>
+          <p className="text-sm text-ink-2">Timeline ({frames.length} frames)</p>
           <button
             onClick={() => onLoopChange(!loop)}
             aria-pressed={loop}
             title={loop ? "Loop is on: plays the selected frames (or all) again and again" : "Loop is off: plays once and stops"}
-            className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs ${
-              loop ? "bg-indigo-500/20 text-indigo-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-white"
+            className={`flex h-7 items-center gap-1.5 rounded-ctrl px-2 text-xs ${
+              loop ? "selected text-icon-on" : "text-ink-3 hoverable hover:text-ink"
             }`}
           >
             <Repeat size={14} /> Loop
@@ -260,7 +260,7 @@ export default function Timeline({
           </button>
           <button
             onClick={onDeleteFrame}
-            className={`${actionClass} hover:bg-red-900/40 hover:text-red-300`}
+            className={`${actionClass} hover:bg-danger-bg hover:text-danger-strong`}
             title="Delete the selected frames"
           >
             <Trash2 size={14} /> Delete
@@ -268,7 +268,7 @@ export default function Timeline({
           {/* Fixed width, so nothing shifts as the numbers change. */}
           <p
             title="Current frame · time · speed"
-            className="ml-3 w-44 whitespace-nowrap text-right text-xs tabular-nums text-zinc-400"
+            className="ml-3 w-44 whitespace-nowrap text-right text-xs font-mono text-ink-2"
           >
             Frame {currentFrame + 1} · {((playheadTick + 1) / fps).toFixed(2)}s · {fps} fps
           </p>
@@ -298,7 +298,7 @@ export default function Timeline({
             <div
               className="absolute inset-x-0 bottom-0 h-1.5"
               style={{
-                backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.18) 0 1px, transparent 1px ${CELL}px)`,
+                backgroundImage: `repeating-linear-gradient(to right, var(--color-line-strong) 0 1px, transparent 1px ${CELL}px)`,
               }}
             />
             {Array.from({ length: rulerTicks }, (_, t) => t + 1)
@@ -306,7 +306,7 @@ export default function Timeline({
               .map((n) => (
                 <span
                   key={n}
-                  className="absolute top-0 text-center text-[10px] leading-3 text-zinc-500"
+                  className="absolute top-0 text-center text-[11px] leading-3 text-ink-3"
                   style={{ left: (n - 1) * CELL, width: CELL }}
                 >
                   {n}
@@ -317,7 +317,7 @@ export default function Timeline({
             {onion && (
               <>
                 <div
-                  className="pointer-events-none absolute inset-y-0 bg-white/5"
+                  className="pointer-events-none absolute inset-y-0 bg-hover"
                   style={{ left: onionLeft, width: onionRight - onionLeft }}
                 />
                 <div
@@ -326,7 +326,7 @@ export default function Timeline({
                   onPointerUp={() => (onionDrag.current = null)}
                   onPointerCancel={() => (onionDrag.current = null)}
                   title={`Onion skin: ${onion.before} before (drag)`}
-                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-l-sm border-y-2 border-l-2 border-red-400"
+                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-l-sm border-y-2 border-l-2 border-danger"
                   style={{ left: onionLeft - 6 }}
                 />
                 <div
@@ -335,7 +335,7 @@ export default function Timeline({
                   onPointerUp={() => (onionDrag.current = null)}
                   onPointerCancel={() => (onionDrag.current = null)}
                   title={`Onion skin: ${onion.after} after (drag)`}
-                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-r-sm border-y-2 border-r-2 border-green-400"
+                  className="absolute inset-y-0 z-20 w-1.5 cursor-col-resize rounded-r-sm border-y-2 border-r-2 border-success"
                   style={{ left: onionRight }}
                 />
               </>
@@ -387,7 +387,7 @@ export default function Timeline({
                   }}
                   onDragEnd={() => setDropSlot(null)}
                   className={`relative flex flex-shrink-0 cursor-pointer border-y border-r first:border-l ${
-                    isSelected ? "border-indigo-500 bg-indigo-500/25" : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                    isSelected ? "border-select-line selected" : "border-line bg-ctrl hoverable"
                   }`}
                   style={{ width: hold * CELL }}
                 >
@@ -410,7 +410,7 @@ export default function Timeline({
                     </div>
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
-                        image ? "bg-zinc-200" : "border border-zinc-400"
+                        image ? "bg-ink" : "border border-line-strong"
                       }`}
                     />
                   </div>
@@ -418,9 +418,9 @@ export default function Timeline({
                   {/* Held cells. */}
                   {hold > 1 && (
                     <div
-                      className={`h-full flex-1 ${isSelected ? "bg-indigo-400/15" : "bg-zinc-600/40"}`}
+                      className={`h-full flex-1 ${isSelected ? "bg-select" : "bg-ctrl-hi"}`}
                       style={{
-                        backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.08) 0 1px, transparent 1px ${CELL}px)`,
+                        backgroundImage: `repeating-linear-gradient(to right, var(--color-hover) 0 1px, transparent 1px ${CELL}px)`,
                       }}
                     />
                   )}
@@ -428,7 +428,7 @@ export default function Timeline({
                   {/* Right edge: drag to change the hold. */}
                   <div
                     title="Drag to change the hold"
-                    className="absolute inset-y-0 -right-1 z-[5] w-2 cursor-col-resize touch-none hover:bg-indigo-400/40"
+                    className="absolute inset-y-0 -right-1 z-[5] w-2 cursor-col-resize touch-none hover:bg-select-line"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => {
@@ -448,7 +448,7 @@ export default function Timeline({
             {/* Where a dragged block will land. */}
             {dropSlot !== null && (
               <div
-                className="pointer-events-none absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-indigo-400"
+                className="pointer-events-none absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-accent"
                 style={{ left: (starts[dropSlot] ?? totalTicks) * CELL }}
               />
             )}
@@ -456,7 +456,7 @@ export default function Timeline({
             <button
               onClick={onAddFrame}
               title="Add a blank frame"
-              className="ml-2 flex flex-shrink-0 items-center justify-center rounded-md border-2 border-dashed border-zinc-600 text-zinc-400 transition hover:border-indigo-500 hover:text-indigo-400"
+              className="ml-2 flex flex-shrink-0 items-center justify-center rounded-ctrl border-2 border-dashed border-line-strong text-ink-2 transition hover:border-select-line hover:text-accent-hi"
               style={{ width: ADD_W }}
             >
               <Plus size={18} />
@@ -465,11 +465,11 @@ export default function Timeline({
 
           {/* Playhead: red line through the current frame, with its tick number on the ruler. */}
           <div
-            className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-red-500"
+            className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-primary"
             style={{ left: playheadX }}
           />
           <div
-            className="pointer-events-none absolute top-0 z-10 h-4 -translate-x-1/2 rounded-sm bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+            className="pointer-events-none absolute top-0 z-10 h-4 -translate-x-1/2 rounded-sm bg-primary px-1 text-center text-[11px] font-semibold leading-4 text-ink"
             style={{ left: playheadX, minWidth: CELL - 6 }}
           >
             {playheadTick + 1}

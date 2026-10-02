@@ -45,16 +45,16 @@ function ProjectSidebar({
   };
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-white/10 bg-[#11151D]">
-      <div className="flex flex-col gap-4 border-b border-white/10 p-4">
-        <div className="flex items-center gap-2 text-white">
+    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-line bg-panel">
+      <div className="flex flex-col gap-4 border-b border-line p-4">
+        <div className="flex items-center gap-2 text-ink">
           <FolderOpen size={18} />
           <h2 className="text-sm font-semibold">Projects</h2>
         </div>
 
         <button
           onClick={onCreate}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          className="flex w-full items-center justify-center gap-2 rounded-ctrl bg-primary hoverable px-4 py-2 text-sm font-medium text-ink"
         >
           <Plus size={16} />
           New Animation
@@ -73,14 +73,14 @@ function ProjectSidebar({
                 onClick={() => {
                   if (editingId !== project.id) onSelect(project.id);
                 }}
-                className={`group relative cursor-pointer rounded-xl border p-2 transition ${
+                className={`group relative cursor-pointer rounded-panel border p-2 transition ${
                   activeProject === project.id
-                    ? "border-indigo-500 bg-indigo-500/10"
-                    : "border-white/5 hover:bg-white/5"
+                    ? "border-transparent selected"
+                    : "border-line hover:bg-hover"
                 }`}
               >
                 <div className="flex gap-3">
-                  <div className="h-14 w-14 overflow-hidden rounded-lg bg-zinc-800">
+                  <div className="h-14 w-14 overflow-hidden rounded-ctrl bg-ctrl">
                     {thumbnail ? (
                       <img
                         src={thumbnail}
@@ -88,7 +88,7 @@ function ProjectSidebar({
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <div className="flex h-full items-center justify-center text-zinc-500">
+                      <div className="flex h-full items-center justify-center text-ink-3">
                         <FolderOpen size={20} />
                       </div>
                     )}
@@ -108,7 +108,7 @@ function ProjectSidebar({
                           if (e.key === "Escape")
                             cancelRename();
                         }}
-                        className="w-full rounded bg-zinc-900 px-2 py-1 text-sm text-white outline-none ring-1 ring-indigo-500"
+                        className="w-full rounded-ctrl bg-panel px-2 py-1 text-sm text-ink outline-none ring-1 ring-accent"
                       />
                     ) : (
                       <p
@@ -117,17 +117,17 @@ function ProjectSidebar({
                           setEditingId(project.id);
                           setEditingName(project.name);
                         }}
-                        className="truncate text-sm font-semibold text-white"
+                        className="truncate text-sm font-semibold text-ink"
                       >
                         {project.name}
                       </p>
                     )}
 
-                    <p className="text-xs text-zinc-400">
+                    <p className="text-xs text-ink-2">
                       {project.frames.length} frames • {project.fps} FPS
                     </p>
 
-                    <p className="mt-1 text-[10px] text-zinc-500">
+                    <p className="mt-1 text-[11px] text-ink-3">
                       {new Date(project.updatedAt).toLocaleDateString()}
                     </p>
                   </div>
@@ -147,7 +147,7 @@ function ProjectSidebar({
       onDelete(project.id);
     }
   }}
-  className="rounded p-1 text-red-400 hover:bg-red-900/30 hover:text-red-300"
+  className="rounded-ctrl p-1 text-danger hover:bg-danger-bg hover:text-danger-strong"
   title="Delete"
 >
   <Trash2 size={12} />

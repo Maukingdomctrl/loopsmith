@@ -16,6 +16,7 @@ import {
   squashAnchorPoint,
   type SquashAnchor,
 } from "@/lib/layers/squash";
+import { rangeFill } from "@/styles/tokens";
 
 interface Props {
   layer: Layer | null;
@@ -54,12 +55,12 @@ export default function SquashPanel({
   };
 
   return (
-    <div className="space-y-2 p-3 pt-0 text-xs">
-      {layer && <div className="text-[10px] text-zinc-500">{layer.name}</div>}
-      <label className="block text-[10px] text-zinc-400">
+    <div className="space-y-3 pb-4 text-xs">
+      {layer && <div className="text-[11px] text-ink-3">{layer.name}</div>}
+      <label className="block text-[11px] text-ink-2">
         <span className="flex justify-between">
           <span>Squash ◂ ▸ Stretch</span>
-          <span className="text-zinc-300">
+          <span className="text-ink">
             {amount === 0 ? "0" : amount > 0 ? `${amount}% taller` : `${-amount}% wider`}
           </span>
         </span>
@@ -73,10 +74,11 @@ export default function SquashPanel({
           onKeyDown={onEnd}
           onKeyUp={onEnd}
           onDoubleClick={() => { onEnd(); set(0); onEnd(); }}
-          className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
-        />
+          className="mt-1 w-full  disabled:opacity-40"
+        style={rangeFill(Math.max(-60, Math.min(60, amount)), -60, 60)}
+      />
       </label>
-      <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+      <div className="flex items-center gap-1 text-[11px] text-ink-2">
         <span className="mr-1">Keep</span>
         {ANCHORS.map((a) => (
           <button
@@ -84,8 +86,8 @@ export default function SquashPanel({
             onClick={() => setAnchor(a.id)}
             disabled={locked}
             title={`The ${a.id} of the layer stays in place`}
-            className={`flex-1 rounded py-0.5 disabled:opacity-40 ${
-              anchor === a.id ? "bg-indigo-500/30 text-white" : "bg-zinc-800 hover:bg-zinc-700"
+            className={`flex-1 rounded-ctrl py-0.5 disabled:opacity-40 ${
+              anchor === a.id ? "selected text-ink" : "bg-ctrl hoverable"
             }`}
           >
             {a.label}
@@ -95,44 +97,46 @@ export default function SquashPanel({
       <button
         onClick={() => { onEnd(); set(0); onEnd(); }}
         disabled={locked || amount === 0}
-        className="w-full rounded bg-zinc-800 py-1 text-[10px] text-zinc-300 hover:bg-zinc-700 disabled:opacity-40"
+        className="w-full rounded-ctrl bg-ctrl py-1 text-[11px] text-ink hoverable disabled:opacity-40"
       >
         Reset squash
       </button>
 
       {onBounce && (
-        <div className="space-y-1 border-t border-white/10 pt-2">
-          <label className="block text-[10px] text-zinc-400">
+        <div className="space-y-1 border-t border-line pt-2">
+          <label className="block text-[11px] text-ink-2">
             <span className="flex justify-between">
               <span>Bounce strength</span>
-              <span className="text-zinc-300">{bounce}%</span>
+              <span className="text-ink">{bounce}%</span>
             </span>
             <input
               type="range" min={5} max={60} step={1}
               value={bounce}
               disabled={locked}
               onChange={(e) => setBounce(Number(e.target.value))}
-              className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
-            />
+              className="mt-1 w-full  disabled:opacity-40"
+        style={rangeFill(bounce, 5, 60)}
+      />
           </label>
-          <label className="block text-[10px] text-zinc-400">
+          <label className="block text-[11px] text-ink-2">
             <span className="flex justify-between">
               <span>Hop height</span>
-              <span className="text-zinc-300">{hop === 0 ? "none" : `${hop} px`}</span>
+              <span className="text-ink">{hop === 0 ? "none" : `${hop} px`}</span>
             </span>
             <input
               type="range" min={0} max={150} step={1}
               value={hop}
               disabled={locked}
               onChange={(e) => setHop(Number(e.target.value))}
-              className="mt-1 w-full accent-indigo-500 disabled:opacity-40"
-            />
+              className="mt-1 w-full  disabled:opacity-40"
+        style={rangeFill(hop, 0, 150)}
+      />
           </label>
           <button
             onClick={() => onBounce(layer, bounce, anchor, hop)}
             disabled={locked || frameCount < 2}
             title="This frame lands (squashed, on the ground); the others follow a bounce: stretched going up, highest and as drawn at the top, stretched coming down. Bouncing again replaces the previous hop."
-            className="w-full rounded bg-zinc-800 py-1 text-[10px] text-zinc-300 hover:bg-zinc-700 disabled:opacity-40"
+            className="w-full rounded-ctrl bg-ctrl py-1 text-[11px] text-ink hoverable disabled:opacity-40"
           >
             Bounce across all frames
           </button>

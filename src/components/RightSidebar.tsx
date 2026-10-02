@@ -3,6 +3,7 @@
 import React from "react";
 import type { ReactNode } from "react";
 import TransparencyPanel from "./TransparencyPanel";
+import { rangeFill } from "@/styles/tokens";
 import type { TransparencyState } from "@/hooks/useTransparency";
 
 interface RightSidebarProps {
@@ -43,17 +44,17 @@ function RightSidebar({
 
 
   return (
-    <aside className="w-72 shrink-0 overflow-y-auto border-l border-white/10 bg-[#141821] p-5">
-      <h2 className="mb-5 font-semibold">Properties</h2>
+    <aside className="w-72 shrink-0 overflow-y-auto border-l border-line bg-panel px-5 py-5">
+      <h2 className="section-title mb-5">Properties</h2>
 
-      <div className="space-y-5">
-        
+      <div className="space-y-6">
+        <div className="section-title">Playback</div>
 
         {/* FPS */}
         <div>
-          <div className="mb-2 flex justify-between text-sm text-zinc-400">
-            <span>Playback FPS</span>
-            <span className="font-semibold text-white">{fps}</span>
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[14px] font-medium text-ink-2">Speed</span>
+            <span className="font-mono text-[15px] font-medium text-ink">{fps} fps</span>
           </div>
 
           <input
@@ -63,10 +64,12 @@ function RightSidebar({
             step={1}
             value={fps}
             onChange={(e) => onFpsChange(Number(e.target.value))}
-            className="w-full accent-indigo-500"
+            aria-label="Playback speed (frames per second)"
+            className="w-full"
+            style={rangeFill(fps, 6, 24)}
           />
 
-          <div className="mt-2 flex justify-between text-[11px] text-zinc-500">
+          <div className="mt-1 flex justify-between font-mono text-[11px] text-ink-3">
             <span>6</span>
             <span>12</span>
             <span>18</span>
@@ -76,9 +79,9 @@ function RightSidebar({
 
         {/* Frame Duration */}
         <div>
-          <div className="mb-2 flex justify-between text-sm text-zinc-400">
-            <span>Frame Hold</span>
-            <span className="font-semibold text-white">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[14px] font-medium text-ink-2">Frame hold</span>
+            <span className="font-mono text-[15px] font-medium text-ink">
               {duration} tick{duration > 1 ? "s" : ""}
             </span>
           </div>
@@ -90,10 +93,12 @@ function RightSidebar({
             step={1}
             value={duration}
             onChange={(e) => onDurationChange(Number(e.target.value))}
-            className="w-full accent-emerald-500"
+            aria-label="Frame hold (ticks)"
+            className="w-full"
+            style={rangeFill(duration, 1, 24)}
           />
 
-          <div className="mt-2 flex justify-between text-[11px] text-zinc-500">
+          <div className="mt-1 flex justify-between font-mono text-[11px] text-ink-3">
             <span>1</span>
             <span>8</span>
             <span>16</span>
@@ -104,16 +109,19 @@ function RightSidebar({
         {/* Onion Skin */}
         <div>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-zinc-400">Onion Skin</span>
+            <span className="text-[14px] font-medium text-ink-2">Onion skin</span>
 
             <button
               onClick={() => onToggleOnion(!onionSkin)}
+              role="switch"
+              aria-checked={onionSkin}
+              aria-label="Onion skin"
               className={`relative h-7 w-12 rounded-full transition ${
-                onionSkin ? "bg-indigo-600" : "bg-zinc-700"
+                onionSkin ? "bg-primary" : "bg-ctrl-hi"
               }`}
             >
               <div
-                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${
+                className={`absolute top-1 h-5 w-5 rounded-full bg-ink transition ${
                   onionSkin ? "left-6" : "left-1"
                 }`}
               />
@@ -124,16 +132,19 @@ function RightSidebar({
         {/* Emoji Guides */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-zinc-400">Emoji Guides</span>
+            <span className="text-[14px] font-medium text-ink-2">Emoji guides</span>
 
             <button
               onClick={() => onToggleGuides(!showGuides)}
+              role="switch"
+              aria-checked={showGuides}
+              aria-label="Emoji guides"
               className={`relative h-7 w-12 rounded-full transition ${
-                showGuides ? "bg-cyan-600" : "bg-zinc-700"
+                showGuides ? "bg-primary" : "bg-ctrl-hi"
               }`}
             >
               <div
-                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${
+                className={`absolute top-1 h-5 w-5 rounded-full bg-ink transition ${
                   showGuides ? "left-6" : "left-1"
                 }`}
               />
@@ -144,10 +155,10 @@ function RightSidebar({
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => onGuideModeChange("face")}
-                className={`rounded-lg py-2 text-xs font-medium transition ${
+                className={`rounded-ctrl py-2 text-xs font-medium hoverable ${
                   guideMode === "face"
-                    ? "bg-cyan-600 text-white"
-                    : "bg-zinc-800 text-zinc-300"
+                    ? "selected text-icon-on"
+                    : "bg-ctrl text-ink"
                 }`}
               >
                 Face
@@ -155,13 +166,13 @@ function RightSidebar({
 
               <button
                 onClick={() => onGuideModeChange("fullbody")}
-                className={`rounded-lg py-2 text-xs font-medium transition ${
+                className={`rounded-ctrl py-2 text-xs font-medium hoverable ${
                   guideMode === "fullbody"
-                    ? "bg-cyan-600 text-white"
-                    : "bg-zinc-800 text-zinc-300"
+                    ? "selected text-icon-on"
+                    : "bg-ctrl text-ink"
                 }`}
               >
-                Full Body
+                Full body
               </button>
             </div>
           )}
@@ -169,9 +180,9 @@ function RightSidebar({
 
             
   </div>
-        <details className="group mt-4 border-t border-white/10 pt-3">
-      <summary className="cursor-pointer select-none list-none text-xs font-semibold tracking-wide text-zinc-400 hover:text-white">
-        ▸ ERASER &amp; TRANSPARENCY
+        <details className="group mt-4">
+      <summary className="cursor-pointer select-none list-none py-3 text-[14px] font-medium text-ink hoverable">
+        Eraser and transparency
       </summary>
     <TransparencyPanel
     enabled={transparency.enabled}

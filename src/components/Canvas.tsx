@@ -71,6 +71,7 @@ import { makePose } from "@/lib/geometry/pose";
 import type { TransparencyState } from "@/hooks/useTransparency";
 import BrushCursor from "./BrushCursor";
 import BrushPanel from "./BrushPanel";
+import { DEFAULT_PAINT, onion, overlay, rangeFill } from "@/styles/tokens";
 
 export type CanvasView = {
   x: number;
@@ -177,8 +178,8 @@ const ONION_BACKGROUND: CanvasBackground = {
 };
 
 /** Onion tints, as in Animate: frames before are red-ish, frames after green-ish. View only. */
-const ONION_BEFORE = "rgb(255, 70, 70)";
-const ONION_AFTER = "rgb(40, 200, 90)";
+const ONION_BEFORE = onion.before;
+const ONION_AFTER = onion.after;
 
 export default function Canvas({
   projectId,
@@ -363,7 +364,7 @@ const commit = useCallback((next: Frame) => {
 
   type PaintTool = "none" | "pencil" | "brush" | "eraser" | "fill" | "picker";
   const [paintTool, setPaintTool] = useState<PaintTool>("none");
-  const [paintColor, setPaintColor] = useState("#2b2b2b");
+  const [paintColor, setPaintColor] = useState(DEFAULT_PAINT);
   /** Pencil / eraser tip radius at full pressure, in CANVAS px (continuous). */
   const [brushSize, setBrushSize] = useState(1.5);
   /** Live pen pressure, so the cursor tip shows the width being drawn. */
@@ -1994,11 +1995,11 @@ const handleCanvasPointerUp = (
   return (
     <section
       ref={sectionRef}
-      className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-[#0B0D12]"
+      className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden workspace-dots"
     >
       <div
         ref={canvasContainerRef}
-        className="relative h-[512px] w-[512px] overflow-hidden rounded-3xl"
+        className="relative h-[512px] w-[512px] overflow-hidden rounded-stage"
         style={{ touchAction: "none" }}
       >
         
@@ -2119,13 +2120,13 @@ onPointerCancel={(e) => {
               <div className="pointer-events-none absolute inset-0 flex h-full items-center justify-center gap-3">
                 <button
                   onClick={() => setPaintTool("pencil")}
-                  className="pointer-events-auto rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                  className="pointer-events-auto rounded-ctrl bg-primary hoverable px-4 py-2 text-sm font-medium text-ink"
                 >
                   Start drawing
                 </button>
                 <button
                   onClick={() => onImport?.()}
-                  className="pointer-events-auto rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600"
+                  className="pointer-events-auto rounded-ctrl bg-ctrl-hi px-4 py-2 text-sm font-medium text-ink hoverable"
                 >
                   Import image
                 </button>
@@ -2151,13 +2152,13 @@ onPointerCancel={(e) => {
                   d={`M ${points.map((p) => `${p.x} ${p.y}`).join(" L ")}${
                     isDrawing ? "" : " Z"
                   }`}
-                  fill={isDrawing ? "none" : "rgba(245,158,11,0.15)"}
-                  stroke="#F59E0B"
+                  fill={isDrawing ? "none" : overlay.lassoFill}
+                  stroke={overlay.lasso}
                   strokeWidth={2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
-                <circle cx={points[0].x} cy={points[0].y} r={5} fill="#F59E0B" />
+                <circle cx={points[0].x} cy={points[0].y} r={5} fill={overlay.lasso} />
               </svg>
             )}
 
@@ -2211,8 +2212,8 @@ onPointerCancel={(e) => {
           />
 
           {isDragOver && (
-            <div className="absolute inset-0 z-40 flex items-center justify-center rounded-3xl border-2 border-dashed border-cyan-400 bg-cyan-400/10">
-              <div className="rounded-xl bg-black/70 px-4 py-2 text-sm font-medium text-white">
+            <div className="absolute inset-0 z-40 flex items-center justify-center rounded-stage border-2 border-dashed border-select-line bg-select">
+              <div className="rounded-panel bg-panel px-4 py-2 text-sm font-medium text-ink">
                 Drop PNG here
               </div>
             </div>
@@ -2231,7 +2232,7 @@ onPointerCancel={(e) => {
               y1="0"
               x2="256"
               y2="512"
-              stroke="#00E5FF"
+              stroke={overlay.crosshair}
               strokeWidth="1"
               strokeDasharray="6 6"
             />
@@ -2240,18 +2241,18 @@ onPointerCancel={(e) => {
               y1="256"
               x2="512"
               y2="256"
-              stroke="#00E5FF"
+              stroke={overlay.crosshair}
               strokeWidth="1"
               strokeDasharray="6 6"
             />
-            <circle cx="256" cy="256" r="4" fill="#00E5FF" />
+            <circle cx="256" cy="256" r="4" fill={overlay.crosshair} />
           </svg>
         )}
 
         {/* ---------- Paint tools ---------- */}
         <div
           ref={paintToolsRef}
-          className="absolute left-3 top-3 z-50 flex flex-col gap-2 rounded-xl bg-black/60 p-1.5"
+          className="absolute left-3 top-3 z-50 flex flex-col gap-2 rounded-panel bg-panel p-1.5"
         >
           {(
             [
@@ -2284,8 +2285,8 @@ onPointerCancel={(e) => {
               aria-expanded={id === "brush" ? brushPanelVisible : undefined}
               title={label}
               aria-label={label}
-              className={`flex h-9 w-9 items-center justify-center rounded-lg text-white transition disabled:opacity-30 ${
-                activeTool === id ? "bg-indigo-600" : "hover:bg-zinc-700"
+              className={`flex h-9 w-9 items-center justify-center rounded-ctrl transition disabled:opacity-30 ${
+                activeTool === id ? "selected text-icon-on" : "text-icon hoverable"
               }`}
             >
               <Icon size={17} />
@@ -2294,7 +2295,7 @@ onPointerCancel={(e) => {
 
           <label
             title="Paint colour"
-            className="relative mx-auto h-7 w-7 cursor-pointer overflow-hidden rounded-full ring-2 ring-white/30"
+            className="relative mx-auto h-7 w-7 cursor-pointer overflow-hidden rounded-full ring-2 ring-line-strong"
             style={{ background: paintColor }}
           >
             <input
@@ -2311,8 +2312,8 @@ onPointerCancel={(e) => {
         {(activeTool === "pencil" ||
           activeTool === "eraser" ||
           (activeTool === "brush" && !brushPanelVisible)) && (
-          <div className="absolute left-16 top-3 z-50 flex items-center gap-2 rounded-xl bg-black/70 px-3 py-2 text-xs text-white">
-            <span className="text-zinc-300">Size</span>
+          <div className="absolute left-16 top-3 z-50 flex items-center gap-2 rounded-panel bg-panel px-3 py-2 text-xs text-ink">
+            <span className="text-ink">Size</span>
             <input
               type="range"
               min={activeTool === "brush" ? brushSpecNow.minSize : 0}
@@ -2327,9 +2328,10 @@ onPointerCancel={(e) => {
                   setBrushSize(sliderToSize(v));
                 }
               }}
-              className="w-28 accent-indigo-500"
-            />
-            <span className="w-8 text-right tabular-nums">
+              className="w-28 "
+        style={rangeFill(activeTool === "brush" ? brushNow.size : sizeToSlider(brushSize), activeTool === "brush" ? brushSpecNow.minSize : 0, activeTool === "brush" ? brushSpecNow.maxSize : 1000)}
+      />
+            <span className="w-8 text-right font-mono">
               {activeTool === "brush" ? brushNow.size : formatSize(brushSize)}
             </span>
           </div>
@@ -2339,11 +2341,11 @@ onPointerCancel={(e) => {
           
           
 
-          <div className="flex flex-col gap-2 rounded-xl bg-black/50 p-1">
+          <div className="flex flex-col gap-2 rounded-panel bg-panel p-1">
             <button
               onClick={undo}
               disabled={isPlaying || selectionActive || !canUndo}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/70 text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-8 w-8 items-center justify-center rounded-ctrl bg-panel text-ink transition-colors hoverable disabled:cursor-not-allowed disabled:opacity-30"
               title={
                 selectionActive
                   ? "Finish or cancel the selection first"
@@ -2356,7 +2358,7 @@ onPointerCancel={(e) => {
             <button
               onClick={redoEdit}
               disabled={isPlaying || selectionActive || !canRedo}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/70 text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-8 w-8 items-center justify-center rounded-ctrl bg-panel text-ink transition-colors hoverable disabled:cursor-not-allowed disabled:opacity-30"
               title={
                 selectionActive
                   ? "Finish or cancel the selection first"
@@ -2369,10 +2371,11 @@ onPointerCancel={(e) => {
 
           <button
             onClick={() => setAlignMode(!alignMode)}
-            className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-              alignMode ? "bg-cyan-500" : "bg-black/70"
-            } text-white`}
-            title="Alignment Mode"
+            className={`flex h-10 w-10 items-center justify-center rounded-panel ${
+              alignMode ? "selected text-icon-on" : "bg-panel text-icon hoverable"
+            }`}
+            title="Alignment mode"
+            aria-label="Alignment mode"
           >
             <Crosshair size={18} />
           </button>
@@ -2392,13 +2395,13 @@ onPointerCancel={(e) => {
                   ? "Reset position, zoom and rotation to use the lasso"
                   : "Flatten to a single layer to use the lasso"
             }
-            className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+            className={`flex h-10 w-10 items-center justify-center rounded-panel ${
               !lassoAvailable
-                ? "cursor-not-allowed bg-zinc-800 opacity-40"
+                ? "cursor-not-allowed bg-ctrl opacity-40"
                 : lassoMode
-                  ? "bg-amber-500"
-                  : "bg-black/70"
-            } text-white`}
+                  ? "selected text-icon-on"
+                  : "bg-panel text-icon hoverable"
+            }`}
           >
             <PenTool size={18} />
           </button>
@@ -2408,14 +2411,14 @@ onPointerCancel={(e) => {
               <button
                 onClick={createSelection}
                 disabled={points.length < 3}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white disabled:opacity-40"
+                className="flex h-10 w-10 items-center justify-center rounded-panel bg-primary text-ink hoverable disabled:opacity-40"
               >
                 <Check size={18} />
               </button>
 
               <button
                 onClick={() => setPoints((p) => p.slice(0, -1))}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-panel bg-ctrl text-ink"
               >
                 <Undo2 size={18} />
               </button>
@@ -2426,7 +2429,7 @@ onPointerCancel={(e) => {
                   setLassoMode(false);
                   setIsDrawing(false);
                 }}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-600 text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-panel border border-danger-line bg-danger-bg text-danger-strong hoverable"
               >
                 <X size={18} />
               </button>
@@ -2437,14 +2440,14 @@ onPointerCancel={(e) => {
             <>
               <button
                 onClick={applySelection}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-panel bg-primary text-ink hoverable"
                 title="Apply selection (Enter)"
               >
                 <Check size={18} />
               </button>
               <button
                 onClick={cancelSelection}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-600 text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-panel border border-danger-line bg-danger-bg text-danger-strong hoverable"
                 title="Cancel selection (Esc)"
               >
                 <X size={18} />
@@ -2455,12 +2458,12 @@ onPointerCancel={(e) => {
 
         {/* Precision controls */}
         {alignMode && (
-          <div className="absolute bottom-3 left-3 z-50 w-44 space-y-2 rounded-xl bg-black/80 p-3">
-            <div className="text-[10px] font-medium tracking-wide text-cyan-300">
-              ALIGNMENT
+          <div className="absolute bottom-3 left-3 z-50 w-44 space-y-2 rounded-panel bg-panel p-3">
+            <div className="section-title">
+              Alignment
             </div>
 
-            <div className="flex items-center justify-between text-xs text-white">
+            <div className="flex items-center justify-between text-xs text-ink">
               <span>X</span>
               <div className="flex items-center gap-2">
                 <span className="w-8 text-center">
@@ -2470,14 +2473,14 @@ onPointerCancel={(e) => {
                   <button
                     disabled={transformsLocked}
                     onClick={() => nudge(-1, 0)}
-                    className="flex h-6 w-6 items-center justify-center rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40"
+                    className="flex h-6 w-6 items-center justify-center rounded-ctrl bg-ctrl hoverable disabled:opacity-40"
                   >
                     –
                   </button>
                   <button
                     disabled={transformsLocked}
                     onClick={() => nudge(1, 0)}
-                    className="flex h-6 w-6 items-center justify-center rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40"
+                    className="flex h-6 w-6 items-center justify-center rounded-ctrl bg-ctrl hoverable disabled:opacity-40"
                   >
                     +
                   </button>
@@ -2485,7 +2488,7 @@ onPointerCancel={(e) => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-white">
+            <div className="flex items-center justify-between text-xs text-ink">
               <span>Y</span>
               <div className="flex items-center gap-2">
                 <span className="w-8 text-center">
@@ -2495,14 +2498,14 @@ onPointerCancel={(e) => {
                   <button
                     disabled={transformsLocked}
                     onClick={() => nudge(0, -1)}
-                    className="flex h-6 w-6 items-center justify-center rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40"
+                    className="flex h-6 w-6 items-center justify-center rounded-ctrl bg-ctrl hoverable disabled:opacity-40"
                   >
                     –
                   </button>
                   <button
                     disabled={transformsLocked}
                     onClick={() => nudge(0, 1)}
-                    className="flex h-6 w-6 items-center justify-center rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40"
+                    className="flex h-6 w-6 items-center justify-center rounded-ctrl bg-ctrl hoverable disabled:opacity-40"
                   >
                     +
                   </button>
@@ -2511,7 +2514,7 @@ onPointerCancel={(e) => {
             </div>
 
             {/* View rotation is a viewing aid, not frame state — so not undoable. */}
-            <div className="flex items-center justify-between text-xs text-white">
+            <div className="flex items-center justify-between text-xs text-ink">
               <span title="View rotation (not saved to the frame)">↻</span>
               <div className="flex gap-1">
                 <button
@@ -2522,7 +2525,7 @@ onPointerCancel={(e) => {
                       rotation: +(view.rotation - 0.5).toFixed(1),
                     })
                   }
-                  className="h-6 w-6 rounded bg-zinc-700 disabled:opacity-40"
+                  className="h-6 w-6 rounded-ctrl bg-ctrl-hi disabled:opacity-40"
                 >
                   –
                 </button>
@@ -2534,7 +2537,7 @@ onPointerCancel={(e) => {
                       rotation: +(view.rotation + 0.5).toFixed(1),
                     })
                   }
-                  className="h-6 w-6 rounded bg-zinc-700 disabled:opacity-40"
+                  className="h-6 w-6 rounded-ctrl bg-ctrl-hi disabled:opacity-40"
                 >
                   +
                 </button>
@@ -2558,21 +2561,21 @@ onPointerCancel={(e) => {
                       : baseSelection,
                 });
               }}
-              className="mt-1 h-8 w-full rounded bg-cyan-600 text-xs font-medium text-white disabled:opacity-40"
+              className="mt-1 h-8 w-full rounded-ctrl bg-primary hoverable text-xs font-medium text-ink disabled:opacity-40"
             >
               Center
             </button>
           </div>
         )}
 
-        <div className="absolute bottom-3 right-3 z-50 flex items-center gap-2 rounded-xl bg-black/80 p-2">
+        <div className="absolute bottom-3 right-3 z-50 flex items-center gap-2 rounded-panel bg-panel p-2">
           <button
             disabled={transformsLocked}
             onClick={() => {
               commitHistory();
               setZoom(targetZoom - 0.05);
             }}
-            className="flex h-8 w-8 items-center justify-center rounded bg-zinc-700 text-white hover:bg-zinc-600 disabled:opacity-40"
+            className="flex h-8 w-8 items-center justify-center rounded-ctrl bg-ctrl text-ink hoverable disabled:opacity-40"
           >
             <Minus size={16} />
           </button>
@@ -2586,8 +2589,9 @@ onPointerCancel={(e) => {
             value={Math.round(targetZoom * 100)}
             onPointerDown={commitHistory}
             onChange={(e) => setZoom(Number(e.target.value) / 100)}
-            className="w-32 accent-cyan-500 disabled:opacity-40"
-          />
+            className="w-32  disabled:opacity-40"
+        style={rangeFill(Math.round(targetZoom * 100), ZOOM_MIN * 100, ZOOM_MAX * 100)}
+      />
 
           <input
             type="number"
@@ -2624,13 +2628,13 @@ onPointerCancel={(e) => {
             onKeyDown={(e) => {
               if (e.key === "Enter") e.currentTarget.blur();
             }}
-            className="w-14 rounded bg-zinc-800 px-1 py-1 text-center text-xs text-white outline-none disabled:opacity-40"
+            className="w-14 rounded-ctrl bg-ctrl px-1 py-1 text-center text-xs text-ink outline-none disabled:opacity-40"
           />
 
           <button
             disabled={transformsLocked}
             onClick={resetTransform}
-            className="h-8 rounded bg-zinc-700 px-2 text-xs text-white hover:bg-zinc-600 disabled:opacity-40"
+            className="h-8 rounded-ctrl bg-ctrl-hi px-2 text-xs text-ink hoverable disabled:opacity-40"
             title="Reset position, zoom & rotation"
           >
             ↺
@@ -2642,7 +2646,7 @@ onPointerCancel={(e) => {
               commitHistory();
               setZoom(targetZoom + 0.05);
             }}
-            className="flex h-8 w-8 items-center justify-center rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40"
+            className="flex h-8 w-8 items-center justify-center rounded-ctrl bg-ctrl text-ink hoverable disabled:opacity-40"
           >
             <Plus size={16} />
           </button>

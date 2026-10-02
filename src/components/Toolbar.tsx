@@ -35,7 +35,7 @@ interface ToolbarProps {
 }
 
 const quiet =
-  "flex h-10 items-center gap-2 rounded-lg px-3 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white disabled:opacity-40";
+  "flex h-10 items-center gap-2 rounded-ctrl px-3 text-sm text-icon hoverable hover:text-ink disabled:opacity-40";
 
 export default function Toolbar({
   isPlaying,
@@ -68,15 +68,15 @@ export default function Toolbar({
         : "Auto stabilize";
 
   return (
-    <header className="shrink-0 flex h-16 items-center justify-between gap-4 border-b border-white/10 bg-[#11151D] px-5">
+    <header className="shrink-0 flex h-16 items-center justify-between gap-4 border-b border-line bg-panel px-5">
       {/* Left: name + save state + file actions */}
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-bold">Loop Emoji Studio</h1>
-        <span className="inline-block w-14 text-xs text-zinc-500">
+        <h1 className="font-display text-[14px] font-semibold">Loop Emoji Studio</h1>
+        <span className="inline-block w-14 text-[12px] text-ink-2">
           {saveStatus === "saving" ? "Saving…" : "Saved"}
         </span>
 
-        <span className="mx-2 h-6 w-px bg-white/10" />
+        <span className="mx-2 h-6 w-px bg-line" />
 
         <button onClick={onUndo} className={quiet} title="Undo (Ctrl+Z)" aria-label="Undo">
           <Undo2 size={18} />
@@ -93,20 +93,20 @@ export default function Toolbar({
 
           {importOpen && (
             <div className="absolute left-0 top-full z-50 w-56 pt-1">
-              <div className="overflow-hidden rounded-xl border border-white/10 bg-[#171B24] shadow-2xl">
+              <div className="overflow-hidden rounded-panel border border-line bg-panel shadow-flyout">
                 <button
                   onClick={() => { setImportOpen(false); onImport(); }}
-                  className="block w-full px-4 py-3 text-left hover:bg-white/5"
+                  className="block w-full px-4 py-3 text-left hover:bg-hover"
                 >
                   <div className="text-sm font-medium">Single image</div>
-                  <div className="text-xs text-zinc-400">Into the current frame</div>
+                  <div className="text-xs text-ink-2">Into the current frame</div>
                 </button>
                 <button
                   onClick={() => { setImportOpen(false); onSlice(); }}
-                  className="block w-full border-t border-white/10 px-4 py-3 text-left hover:bg-white/5"
+                  className="block w-full border-t border-line px-4 py-3 text-left hover:bg-hover"
                 >
                   <div className="text-sm font-medium">Spritesheet</div>
-                  <div className="text-xs text-zinc-400">Cut into frames</div>
+                  <div className="text-xs text-ink-2">Cut into frames</div>
                 </button>
               </div>
             </div>
@@ -120,12 +120,12 @@ export default function Toolbar({
           onClick={onAutoStabilize}
           disabled={isPlaying || isStabilizing}
           title="Estimate the loop's global motion and remove only jitter"
-          className={`flex h-10 min-w-[168px] items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition disabled:opacity-50 ${
+          className={`flex h-10 min-w-[168px] items-center justify-center gap-2 rounded-ctrl px-4 text-sm font-semibold transition disabled:opacity-50 ${
             stabilizationStale
-              ? "bg-amber-500 text-zinc-900 hover:bg-amber-400"
+              ? "bg-warn-bg text-warn hoverable"
               : hasStabilization && !isStabilizing
-                ? "bg-emerald-600/20 text-emerald-300 ring-1 ring-emerald-500/40 hover:bg-emerald-600/30"
-                : "bg-amber-500 text-zinc-900 hover:bg-amber-400"
+                ? "bg-ctrl text-ink-2 hoverable"
+                : "bg-ctrl text-ink hoverable"
           }`}
         >
           <Wand2 size={16} />
@@ -137,10 +137,10 @@ export default function Toolbar({
             onClick={onClearStabilization}
             disabled={isPlaying}
             title="Discard automatic stabilization"
-            className={`flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium disabled:opacity-40 ${
+            className={`flex h-10 items-center gap-1.5 rounded-ctrl px-3 text-sm font-medium disabled:opacity-40 ${
               stabilizationStale
-                ? "bg-amber-600 text-white hover:bg-amber-500"
-                : "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                ? "bg-warn-bg text-warn hoverable"
+                : "bg-ctrl text-ink hoverable"
             }`}
           >
             <X size={14} />
@@ -150,7 +150,7 @@ export default function Toolbar({
 
         <button
           onClick={onPlay}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-zinc-900 hover:bg-zinc-200"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-ctrl text-ink hoverable"
           title={isPlaying ? "Pause (Enter)" : "Play (Enter)"}
           aria-label={isPlaying ? "Pause" : "Play"}
         >
@@ -161,7 +161,7 @@ export default function Toolbar({
       {/* Right: finish */}
       <button
         onClick={onExport}
-        className="flex h-10 items-center gap-2 rounded-lg border border-white/15 px-4 text-sm font-medium hover:bg-white/5"
+        className="flex h-10 items-center gap-2 rounded-ctrl border border-line-strong px-4 text-sm font-medium hover:bg-hover"
       >
         <Download size={18} />
         Export

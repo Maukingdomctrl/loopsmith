@@ -30,10 +30,10 @@ export default function TransparencyPanel({
             onToolChange("brush");
             onEnabledChange(e.target.checked);
           }}
-          className="accent-indigo-500"
+          className=""
         />
       </label>
-      <p className="text-[11px] leading-snug text-zinc-500">
+      <p className="text-[11px] leading-snug text-ink-3">
         When on, drag on the canvas to erase. Turn it off to move the artwork again.
       </p>
     </div>

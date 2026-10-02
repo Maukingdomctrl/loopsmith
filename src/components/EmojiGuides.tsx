@@ -1,5 +1,7 @@
 "use client";
 
+import { guideLavender, guideSage } from "@/styles/tokens";
+
 interface Props {
   visible: boolean;
   mode?: "face" | "fullbody";
@@ -22,7 +24,7 @@ export default function EmojiGuides({
         cy="256"
         r="240"
         fill="none"
-        stroke="#64748B"
+        stroke={guideLavender}
         strokeWidth="1.5"
         strokeDasharray="8 8"
         opacity="0.45"
@@ -34,7 +36,7 @@ export default function EmojiGuides({
         y1="16"
         x2="256"
         y2="496"
-        stroke="#22C55E"
+        stroke={guideSage}
         strokeWidth="1.5"
         strokeDasharray="6 6"
         opacity="0.7"
@@ -46,7 +48,7 @@ export default function EmojiGuides({
         y1="256"
         x2="496"
         y2="256"
-        stroke="#22C55E"
+        stroke={guideSage}
         strokeWidth="1.5"
         strokeDasharray="6 6"
         opacity="0.35"
@@ -60,7 +62,7 @@ export default function EmojiGuides({
             y1="173"
             x2="472"
             y2="173"
-            stroke="#60A5FA"
+            stroke={guideLavender}
             strokeWidth="1.5"
             strokeDasharray="6 6"
             opacity="0.8"
@@ -72,7 +74,7 @@ export default function EmojiGuides({
             cy="173"
             r="83"
             fill="none"
-            stroke="#A78BFA"
+            stroke={guideLavender}
             strokeWidth="1.5"
             strokeDasharray="5 5"
             opacity="0.7"
@@ -88,7 +90,7 @@ export default function EmojiGuides({
             y1="176"
             x2="472"
             y2="176"
-            stroke="#60A5FA"
+            stroke={guideLavender}
             strokeWidth="1.5"
             strokeDasharray="6 6"
             opacity="0.6"
@@ -100,7 +102,7 @@ export default function EmojiGuides({
             y1="424"
             x2="472"
             y2="424"
-            stroke="#F59E0B"
+            stroke={guideSage}
             strokeWidth="1.5"
             strokeDasharray="6 6"
             opacity="0.9"
