@@ -30,6 +30,9 @@ import {
   STAMP_PADDING,
 } from "./constants";
 
+/** Inner-to-outer radius of the star: 0.5 reads as a friendly emoji star. */
+const STAR_INNER_RATIO = 0.5;
+
 /* ============================================================ */
 /*  primitive SDFs — all in shape-local, centre-origin space    */
 /* ============================================================ */
@@ -69,6 +72,29 @@ function sdSegment(px: number, py: number, ax: number, ay: number, bx: number, b
   // Degenerate segment is a point; that is the correct limit, not an error.
   const h = denom > 1e-12 ? clamp((pax * bax + pay * bay) / denom, 0, 1) : 0;
   return Math.hypot(pax - bax * h, pay - bay * h);
+}
+
+/**
+ * Five-pointed star of outer radius r, pointing up (canvas y grows down).
+ * `inner` is the inner-to-outer radius ratio. Exact for the regular star;
+ * the caller squashes the sample point for non-square rects, which bends the
+ * distance slightly — well inside the one-pixel antialiasing band.
+ */
+function sdStar5(px: number, py: number, r: number, inner: number): number {
+  const k1x = 0.809016994375, k1y = -0.587785252292;
+  const k2x = -k1x, k2y = k1y;
+  let x = Math.abs(px);
+  let y = -py; // point up on a y-down canvas
+  let d = 2 * Math.max(k1x * x + k1y * y, 0);
+  x -= d * k1x; y -= d * k1y;
+  d = 2 * Math.max(k2x * x + k2y * y, 0);
+  x -= d * k2x; y -= d * k2y;
+  x = Math.abs(x);
+  y -= r;
+  const bax = inner * -k1y, bay = inner * k1x - 1;
+  const h = clamp((x * bax + y * bay) / (bax * bax + bay * bay), 0, r);
+  const ex = x - bax * h, ey = y - bay * h;
+  return Math.hypot(ex, ey) * Math.sign(y * bax - x * bay);
 }
 
 /**
@@ -185,6 +211,19 @@ function buildField(geom: ShapeGeometry): { field: Field; bounds: Rect } {
           x: Math.min(a.x, b.x) - pad, y: Math.min(a.y, b.y) - pad,
           w: Math.abs(dx) + 2 * pad, h: Math.abs(dy) + 2 * pad,
         }),
+      };
+    }
+    case "star": {
+      // Fit the star to the rect: sample in a square space of radius
+      // min(hx, hy), stretched back out to the rect's aspect.
+      const rr = Math.min(hx, hy);
+      const sx = rr / hx, sy = rr / hy;
+      return {
+        field: (x, y) => {
+          const p = toLocal(x, y);
+          return sdStar5(p.x * sx, p.y * sy, rr, STAR_INNER_RATIO) / Math.max(sx, sy);
+        },
+        bounds: r,
       };
     }
   }

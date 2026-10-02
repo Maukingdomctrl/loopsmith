@@ -27,7 +27,7 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
   compositor (`lib/layers/composite.ts`) renders them analytically at every resolution (view,
   flatten, GIF) over the layer's `image`: spline + signed-distance edges, procedural paper
   (`paper.ts`), no stamps. Renders are cached; views show a stand-in while zooming, then refine.
-- **Brush and fill work on pixels** (`lib/raster`: `RasterSurface`, `MaterialStroke`, `floodFill`, commit via
+- **Brush, fill and shapes work on pixels** (`lib/raster`: `RasterSurface`, `MaterialStroke`, `floodFill`, commit via
   `surface.commit()`, decoded before it is swapped in so the canvas never blinks). Before brush, fill or the
   lasso touch a layer, its pencil strokes are baked into `image` (`pencil/bake.ts`).
 - **Brushes** (`lib/raster/brushes/`): one `MaterialStroke`, built on the existing `StrokePath`, drives five
@@ -42,7 +42,9 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
   `inverted` / `enabled` are flags. The compositor turns it into alpha (`layerMask`) and applies it with
   `destination-in`; adjustment layers use it as per-pixel strength. With the mask thumbnail picked
   (`editMask`), every paint tool paints greys into the mask through the pixel surface.
-- Tools: Pencil (P), Brush (B, opens its panel), Eraser (E), Fill (G), Picker (I).
+- Tools: Pencil (P), Brush (B, opens its panel), Eraser (E), Fill (G), Picker (I), Shapes (U).
+- **Shapes** (`lib/raster/shapes.ts`, signed-distance fields): picked in the tool rail's Shapes flyout. A drag
+  redraws the shape from a surface snapshot each move; release commits it to pixels like Fill (one undo step).
 - Every paint edit is one undo step (`onHistoryCommit`) and sets `flattenKey: null`.
 - Background is document state (`CanvasBackground`); checkerboard is view-only and never exported.
 - Page layout is a fixed flex frame (Toolbar / sidebars / Canvas / Timeline). Nothing should shift size.

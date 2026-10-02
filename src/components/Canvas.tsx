@@ -30,13 +30,15 @@ import {
   baseLayerMatrix,
 } from "@/lib/frameTransform";
 import { MAT_IDENTITY, matApply, matInvert } from "@/lib/geometry/mat2d";
-import { RasterSurface } from "@/lib/raster/surface";
+import { RasterSurface, type SurfaceSnapshot } from "@/lib/raster/surface";
 import { MaterialStroke } from "@/lib/raster/brushes/materialStroke";
 import { brushSpec, defaultBrushPrefs } from "@/lib/raster/brushes/presets";
 import type { BrushId, BrushPrefs } from "@/lib/raster/brushes/types";
 import { floodFill } from "@/lib/raster/floodFill";
+import { drawShape, geometryFromDrag } from "@/lib/raster/shapes";
+import { DEFAULT_ARROW_HEAD_LENGTH, DEFAULT_ARROW_HEAD_WIDTH, normalizePressure } from "@/lib/raster/constants";
+import { rectNormalize } from "@/lib/geometry/rect";
 import { parseHex, toHex } from "@/lib/raster/color";
-import { normalizePressure } from "@/lib/raster/constants";
 import {
   PENCIL_MAX_SIZE,
   PENCIL_MIN_SIZE,
@@ -47,7 +49,7 @@ import {
 import { renderStrokes, widthFactor } from "@/lib/pencil/render";
 import { bakeLayerStrokes } from "@/lib/pencil/bake";
 import { markLiveStroke, onStrokeRefine, type BitmapResolver } from "@/lib/layers/composite";
-import type { FloodFillSettings, RGBA } from "@/types/raster";
+import type { FloodFillSettings, RGBA, ShapeKind } from "@/types/raster";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
 import { DEFAULT_BACKGROUND } from "@/types/layer";
@@ -366,7 +368,7 @@ const commit = useCallback((next: Frame) => {
   /*  into the bitmap first. One stroke = one undo step.                */
   /* ================================================================ */
 
-  type PaintTool = "none" | "pencil" | "brush" | "eraser" | "fill" | "picker";
+  type PaintTool = "none" | "pencil" | "brush" | "eraser" | "fill" | "picker" | "shape";
   const [paintTool, setPaintTool] = useState<PaintTool>("none");
   const [paintColor, setPaintColor] = useState(DEFAULT_PAINT);
   /** Pencil / eraser tip radius at full pressure, in CANVAS px (continuous). */
@@ -399,6 +401,12 @@ const commit = useCallback((next: Frame) => {
     return () => ro.disconnect();
   }, []);
   const stagePx = Math.max(240, Math.min(stageSize, stageRoom));
+  /** Shapes: which one, solid or outline, and the outline width in canvas px. */
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
+  const [shapeFill, setShapeFill] = useState(false);
+  const [shapeWidth, setShapeWidth] = useState(4);
+  /** The shape being dragged: the surface as it was, so each move redraws from clean. */
+  const shapeRef = useRef<{ start: { x: number; y: number }; snap: SurfaceSnapshot; drew: boolean } | null>(null);
   /** Where the brush panel sits, in the workspace's own coordinates. */
   const [brushPanelPos, setBrushPanelPos] = useState({ left: 12, top: 12 });
 
@@ -497,8 +505,8 @@ const commit = useCallback((next: Frame) => {
       }
     }
 
-    // Fill and the material brushes work on pixels.
-    if (activeTool !== "fill" && activeTool !== "brush") return;
+    // Fill, shapes and the material brushes work on pixels.
+    if (activeTool !== "fill" && activeTool !== "brush" && activeTool !== "shape") return;
 
     // A different layer: its pixels are not the surface we hold.
     if (surfaceLayerRef.current !== paintLayer.id) {
@@ -582,7 +590,8 @@ const commit = useCallback((next: Frame) => {
     const canvas = baseCanvasRef.current;
     const live = liveRef.current;
     const stroke = strokeRef.current;
-    if (!canvas || !paintLayer || (!live && !stroke)) return;
+    const shaping = !!shapeRef.current;
+    if (!canvas || !paintLayer || (!live && !stroke && !shaping)) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -591,7 +600,7 @@ const commit = useCallback((next: Frame) => {
     // Material brush (and anything on a mask): the working surface stands in
     // for the layer's pixels or mask, so the stroke shows in its place in the
     // stack, with its blend, opacity and mask.
-    if (stroke || (live && maskMode)) {
+    if (stroke || shaping || (live && maskMode)) {
       const surface = surfaceRef.current;
       if (!surface) return;
       stroke?.previewInto();
@@ -837,6 +846,14 @@ const commit = useCallback((next: Frame) => {
       return true;
     }
 
+    if (activeTool === "shape") {
+      if (!surfaceReady()) return true;
+      onHistoryCommit?.();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      shapeRef.current = { start: local, snap: surfaceRef.current!.snapshot(), drew: false };
+      return true;
+    }
+
     // Alpha lock keeps every pixel's alpha, so the eraser has nothing to do.
     if (activeTool === "eraser" && lockAlpha) return true;
     // Mask strokes are baked into the mask's pixels on pen-up.
@@ -888,7 +905,62 @@ const commit = useCallback((next: Frame) => {
     return true;
   };
 
+  /** Redraw the dragged shape from the clean snapshot, up to the pointer. */
+  const drawShapeTo = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = shapeRef.current;
+    const surface = surfaceRef.current;
+    if (!drag || !surface || !paintLayer) return;
+    const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
+    const p = screenToCanvas({ x: e.clientX, y: e.clientY }, rect, view);
+    const end = toLocal(p.x, p.y);
+    if (!end) return;
+    surface.restore(drag.snap);
+    if (Math.hypot(end.x - drag.start.x, end.y - drag.start.y) < 1) {
+      drag.drew = false;
+      schedulePreview();
+      return;
+    }
+    const scale = Math.max(1e-6, Math.abs(paintLayer.pose.scale.x));
+    const width = shapeWidth / scale;
+    const geom = {
+      ...geometryFromDrag(shapeKind, drag.start, end, {
+        constrain: e.shiftKey,
+        fromCenter: e.altKey,
+      }),
+      // Arrow heads grow with the line, so a thick arrow still reads as one.
+      headLength: Math.max(DEFAULT_ARROW_HEAD_LENGTH / scale, width * 4),
+      headWidth: Math.max(DEFAULT_ARROW_HEAD_WIDTH / scale, width * 2.5),
+    };
+    const color = paintRGBA();
+    const solid = shapeFill && shapeKind !== "line" && shapeKind !== "arrow";
+    const res = drawShape(surface, geom, {
+      fill: solid ? color : null,
+      stroke: solid ? null : color,
+      strokeWidth: width,
+      cornerRadius: 0,
+      opacity: 1,
+      blend: "normal",
+      antialias: 1,
+    });
+    if (!maskMode && paintLayer.alphaLock) {
+      const pad = width + 2;
+      const r = rectNormalize(geom.rect);
+      surface.keepAlpha(drag.snap.data, {
+        x: r.x - pad - geom.headLength,
+        y: r.y - pad - geom.headLength,
+        w: r.w + 2 * (pad + geom.headLength),
+        h: r.h + 2 * (pad + geom.headLength),
+      });
+    }
+    drag.drew = !!(res.fillBounds || res.strokeBounds);
+    schedulePreview();
+  };
+
   const paintMove = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
+    if (shapeRef.current) {
+      drawShapeTo(e);
+      return true;
+    }
     const rect = canvasContainerRef.current?.getBoundingClientRect() ?? null;
     // Pens report far more samples than frames: take every one of them.
     const native = e.nativeEvent;
@@ -928,6 +1000,24 @@ const commit = useCallback((next: Frame) => {
   };
 
   const paintUp = (e: React.PointerEvent<HTMLCanvasElement>): boolean => {
+    const drag = shapeRef.current;
+    if (drag) {
+      shapeRef.current = null;
+      if (previewRaf.current) {
+        cancelAnimationFrame(previewRaf.current);
+        previewRaf.current = 0;
+      }
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      // As with the brush: the preview stays up until the new bitmap decodes.
+      if (drag.drew) commitSurface();
+      else {
+        surfaceRef.current?.restore(drag.snap);
+        setDecodeGeneration((g) => g + 1);
+      }
+      return true;
+    }
     const stroke = strokeRef.current;
     if (stroke) {
       strokeRef.current = null;
@@ -1003,10 +1093,11 @@ const commit = useCallback((next: Frame) => {
         e: "eraser",
         g: "fill",
         i: "picker",
+        u: "shape",
       };
       if (map[k]) {
         setPaintTool((cur) => (cur === map[k] ? "none" : map[k]));
-      } else if (e.key === "Escape" && !liveRef.current && !strokeRef.current) {
+      } else if (e.key === "Escape" && !liveRef.current && !strokeRef.current && !shapeRef.current) {
         // Esc closes the brush panel first, then puts the tool away.
         if (brushPanelVisibleRef.current) setBrushPanelOpen(false);
         else setPaintTool("none");
@@ -2323,6 +2414,13 @@ onPointerCancel={(e) => {
         }}
         onFit={resetTransform}
         onFlyoutOpen={() => setBrushPanelOpen(false)}
+        shapeKind={shapeKind}
+        shapeFill={shapeFill}
+        onShapePick={(kind) => {
+          setShapeKind(kind);
+          setPaintTool("shape");
+        }}
+        onShapeFillChange={setShapeFill}
       />
 
         {/* The brush panel carries its own size slider; this bar is for the pencil and eraser, and for the brush while its panel is shut. */}
@@ -2352,6 +2450,25 @@ onPointerCancel={(e) => {
             <span className="w-9 text-right font-mono">
               {activeTool === "brush" ? brushNow.size : formatSize(brushSize)}
             </span>
+          </div>
+        )}
+
+        {/* Outline width for shapes (a solid shape has no outline to size). */}
+        {activeTool === "shape" && !(shapeFill && shapeKind !== "line" && shapeKind !== "arrow") && (
+          <div className="absolute z-50 flex h-10 items-center gap-3 rounded-panel border border-line bg-panel px-3 text-[13px] text-ink shadow-rail" style={{ left: 76, top: 52 }}>
+            <span className="text-ink-2">Line width</span>
+            <input
+              type="range"
+              min={1}
+              max={40}
+              step={1}
+              value={shapeWidth}
+              onChange={(e) => setShapeWidth(Number(e.target.value))}
+              aria-label="Shape line width"
+              className="w-28"
+              style={rangeFill(shapeWidth, 1, 40)}
+            />
+            <span className="w-9 text-right font-mono">{shapeWidth}</span>
           </div>
         )}
 

@@ -163,7 +163,7 @@ export interface HSVA {
 
 /* ========== shapes ========== */
 
-export type ShapeKind = "rectangle" | "ellipse" | "line" | "triangle" | "arrow";
+export type ShapeKind = "rectangle" | "ellipse" | "line" | "triangle" | "arrow" | "star";
 
 export interface ShapeStyle {
   readonly fill: RGBA | null;
