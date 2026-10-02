@@ -36,6 +36,7 @@ import {
   Triangle,
 } from "lucide-react";
 import type { CanvasBackground } from "@/types/layer";
+import type { ShapeKind } from "@/types/raster";
 import { BACKGROUND_SWATCHES, checkerStyle } from "@/styles/tokens";
 
 export type RailTool = "pencil" | "brush" | "eraser" | "fill" | "picker";
@@ -78,6 +79,12 @@ interface Props {
 
   /** Called when a flyout opens, so the brush panel can make way. */
   onFlyoutOpen?: () => void;
+
+  /** Shape tool: which shape, and solid or outline. */
+  shapeKind: ShapeKind;
+  shapeFill: boolean;
+  onShapePick: (kind: ShapeKind) => void;
+  onShapeFillChange: (fill: boolean) => void;
 }
 
 /** Where the rail sits in the canvas area, and where flyouts open. */
@@ -92,6 +99,7 @@ export default function ToolRail(props: Props) {
     onionSkin, onOnionSkinChange, showGuides, guideMode, onGuidesChange,
     onDuplicateFrame, onClearFrame, onDeleteFrame, frameActionsDisabled,
     zoom, zoomDisabled, onZoomIn, onZoomOut, onFit, onFlyoutOpen,
+    shapeKind, shapeFill, onShapePick, onShapeFillChange,
   } = props;
 
   const innerRef = useRef<HTMLDivElement | null>(null);
@@ -243,9 +251,12 @@ export default function ToolRail(props: Props) {
         )}
         {button({
           label: "Shapes",
+          shortcut: "U",
+          tool: "shape",
           icon: <Shapes size={17} />,
           flyout: "shapes",
-          selected: flyout?.id === "shapes",
+          selected: activeTool === "shape" || flyout?.id === "shapes",
+          disabled: toolsDisabled,
           onClick: (el) => toggleFlyout("shapes", el),
         })}
 
@@ -387,7 +398,17 @@ export default function ToolRail(props: Props) {
           className="absolute z-[70] flex w-12 flex-col items-center gap-0.5 rounded-panel border border-line-strong bg-ctrl p-1.5 shadow-flyout"
           style={{ left: FLYOUT_LEFT, top: flyout.top }}
         >
-          {flyout.id === "shapes" && <ShapesFlyout />}
+          {flyout.id === "shapes" && (
+            <ShapesFlyout
+              active={activeTool === "shape" ? shapeKind : null}
+              fill={shapeFill}
+              onPick={(kind) => {
+                onShapePick(kind);
+                setFlyout(null);
+              }}
+              onFillChange={onShapeFillChange}
+            />
+          )}
           {flyout.id === "background" && onBackgroundChange && (
             <BackgroundFlyout background={background} onChange={onBackgroundChange} />
           )}
@@ -452,37 +473,59 @@ function OnionIcon({ on }: { on: boolean }) {
   );
 }
 
-const flyItem =
-  "flex h-9 w-9 shrink-0 items-center justify-center rounded-tool text-icon hoverable disabled:cursor-not-allowed disabled:opacity-30";
-
-/** Shapes need a drawing tool the app does not have yet: shown, disabled. */
-function ShapesFlyout() {
-  const soon = " (not available yet)";
-  const items: [string, ReactNode][] = [
-    ["Line", <Slash key="i" size={16} />],
-    ["Rectangle", <Square key="i" size={16} />],
-    ["Ellipse", <Circle key="i" size={16} />],
-    ["Triangle", <Triangle key="i" size={16} />],
-    ["Arrow", <ArrowUpRight key="i" size={16} />],
-    ["Star", <Star key="i" size={16} />],
+/** Pick a shape (it becomes the tool), and whether shapes are solid. */
+function ShapesFlyout({
+  active,
+  fill,
+  onPick,
+  onFillChange,
+}: {
+  active: ShapeKind | null;
+  fill: boolean;
+  onPick: (kind: ShapeKind) => void;
+  onFillChange: (fill: boolean) => void;
+}) {
+  const items: [ShapeKind, string, ReactNode][] = [
+    ["line", "Line", <Slash key="i" size={16} />],
+    ["rectangle", "Rectangle", <Square key="i" size={16} />],
+    ["ellipse", "Ellipse", <Circle key="i" size={16} />],
+    ["triangle", "Triangle", <Triangle key="i" size={16} />],
+    ["arrow", "Arrow", <ArrowUpRight key="i" size={16} />],
+    ["star", "Star", <Star key="i" size={16} />],
   ];
   return (
     <>
-      {items.map(([label, icon]) => (
-        <button key={label} role="menuitem" disabled title={label + soon} aria-label={label + soon} className={flyItem}>
+      {items.map(([kind, label, icon]) => (
+        <button
+          key={kind}
+          role="menuitemradio"
+          aria-checked={active === kind}
+          onClick={() => onPick(kind)}
+          title={`${label} (Shift: even, Alt: from centre)`}
+          aria-label={label}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-tool ${
+            active === kind ? "selected text-icon-on" : "text-icon hoverable hover:text-ink"
+          }`}
+        >
           {icon}
         </button>
       ))}
       <span className="my-[3px] h-px w-4 bg-line-strong" />
       <button
         role="menuitemcheckbox"
-        aria-checked={false}
-        disabled
-        title={"Fill shape" + soon}
-        aria-label={"Fill shape" + soon}
-        className={flyItem}
+        aria-checked={fill}
+        onClick={() => onFillChange(!fill)}
+        title={fill ? "Fill shape: on (solid)" : "Fill shape: off (outline)"}
+        aria-label="Fill shape"
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-tool ${
+          fill ? "selected text-icon-on" : "text-icon hoverable"
+        }`}
       >
-        <span className="h-3.5 w-3.5 rounded-[3px] bg-icon" />
+        {fill ? (
+          <span className="h-3.5 w-3.5 rounded-[3px] bg-current" />
+        ) : (
+          <span className="h-3.5 w-3.5 rounded-[3px] border-[1.5px] border-current" />
+        )}
       </button>
     </>
   );
