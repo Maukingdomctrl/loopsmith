@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Copy, Eraser, Trash2, Repeat } from "lucide-react";
+import { Plus, Repeat } from "lucide-react";
 import type { CanvasBackground } from "@/types/layer";
 import { checkerStyle } from "@/styles/tokens";
 
@@ -43,8 +43,6 @@ interface TimelineProps {
   onHoldChange: (frame: number, hold: number, firstChange: boolean) => void;
   onAddFrame: () => void;
   onImportFrame: (frame: number) => void;
-  onDuplicate: () => void;
-  onClear: () => void;
   onDeleteFrame: () => void;
   onCopy: () => void;
   onPaste: () => void;
@@ -69,16 +67,11 @@ export default function Timeline({
   onHoldChange,
   onAddFrame,
   onImportFrame,
-  onDuplicate,
-  onClear,
   onDeleteFrame,
   onCopy,
   onPaste,
   background,
 }: TimelineProps) {
-  const actionClass =
-    "flex h-8 items-center gap-1.5 rounded-ctrl px-2.5 text-[13px] text-ink-2 hoverable hover:text-ink";
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewWidth, setViewWidth] = useState(0);
 
@@ -262,19 +255,6 @@ export default function Timeline({
         </div>
 
         <div className="flex items-center gap-1">
-          <button onClick={onDuplicate} className={actionClass} title="Duplicate this frame">
-            <Copy size={14} /> Duplicate
-          </button>
-          <button onClick={onClear} className={actionClass} title="Clear this frame's pixels">
-            <Eraser size={14} /> Clear
-          </button>
-          <button
-            onClick={onDeleteFrame}
-            className={`${actionClass} text-danger hover:bg-danger-bg hover:text-danger-strong`}
-            title="Delete the selected frames"
-          >
-            <Trash2 size={14} /> Delete
-          </button>
           {/* Fixed width, so nothing shifts as the numbers change. */}
           <p
             title="Current frame · time · speed"

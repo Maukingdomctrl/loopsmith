@@ -11,7 +11,6 @@ import ProjectSidebar from "@/components/ProjectSidebar";
 import LayerPanel from "@/components/LayerPanel";
 import TransformPanel from "@/components/TransformPanel";
 import SquashPanel from "@/components/SquashPanel";
-import TransparencyToggle from "@/components/TransparencyToggle";
 import ExportDialog, {
   type ExportSize,
   type ExportLimit,
@@ -1544,14 +1543,19 @@ const deleteProject = useCallback(
           onChange={updateCurrentFrame}
           onHistoryCommit={handleHistoryCommit}
           onHistoryPushFrame={handleHistoryPushFrame}
-          onUndo={undo}
-          onRedo={redo}
           onSelectionActiveChange={setSelectionActive}
-          canUndo={undoStack.current.length > 0}
-          canRedo={redoStack.current.length > 0}
           showGuides={showGuides}
           guideMode={guideMode}
           stageSize={stageSize}
+          onBackgroundChange={handleBackgroundChange}
+          onOnionSkinChange={setOnionSkin}
+          onGuidesChange={(show, mode) => {
+            setShowGuides(show);
+            setGuideMode(mode);
+          }}
+          onDuplicateFrame={() => insertAfterCurrent([duplicateFrame(frames[editingIndex])])}
+          onClearFrame={clearActiveLayerPixels}
+          onDeleteFrame={deleteSelectedFrames}
         />
 
         {/* Hidden with display, not unmounted, so panel state survives a collapse. */}
@@ -1586,6 +1590,21 @@ const deleteProject = useCallback(
         <div className={propertiesOpen ? "contents" : "hidden"}>
         <RightSidebar
           onCollapse={() => setPropertiesOpen(false)}
+          transparencyExtra={
+            <div className="space-y-2 pt-4">
+              <button
+                onClick={removeArtBackground}
+                disabled={isPlaying || removingArtBg}
+                title="Remove the solid colour baked into the frames (e.g. the sheet they were cut from), so it no longer moves with the artwork"
+                className="h-9 w-full rounded-ctrl bg-ctrl px-3 text-[13px] font-medium text-ink hoverable disabled:opacity-40"
+              >
+                {removingArtBg ? "Removing…" : "Remove background from art"}
+              </button>
+              {artBgNotice && (
+                <p className="text-[12px] leading-snug text-ink-2">{artBgNotice}</p>
+              )}
+            </div>
+          }
           activeFrame={activeFrame}
           fps={fps}
           onFpsChange={(value) =>
@@ -1594,8 +1613,6 @@ const deleteProject = useCallback(
               fps: value,
             }))
           }
-          onionSkin={onionSkin}
-          onToggleOnion={setOnionSkin}
           duration={frames[activeFrame]?.duration ?? 1}
           onDurationChange={(value) =>
             updateProject((project) => {
@@ -1607,10 +1624,6 @@ const deleteProject = useCallback(
               return { ...project, frames: next };
             })
           }
-          showGuides={showGuides}
-          onToggleGuides={setShowGuides}
-          guideMode={guideMode}
-          onGuideModeChange={setGuideMode}
           transparency={transparency}
           onTransparencyChange={patch}
         >
@@ -1638,14 +1651,6 @@ const deleteProject = useCallback(
               onBounce={applyBounce}
             />
           </Accordion>
-          <TransparencyToggle
-            background={background}
-            onChange={handleBackgroundChange}
-            disabled={isPlaying}
-            onRemoveArtBackground={removeArtBackground}
-            removingArtBackground={removingArtBg}
-            artBackgroundNotice={artBgNotice}
-          />
         </RightSidebar>
         </div>
         {!propertiesOpen && (
@@ -1709,8 +1714,6 @@ const deleteProject = useCallback(
           selectFrame(frame);
           openPicker({ kind: "replace-active", frame });
         }}
-                onClear={clearActiveLayerPixels}
-        onDuplicate={() => insertAfterCurrent([duplicateFrame(frames[editingIndex])])}
         onDeleteFrame={deleteSelectedFrames}
         onCopy={() => {
           frameClipboard.current = frames.filter((f) => selection.includes(f.id));

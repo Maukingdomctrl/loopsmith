@@ -12,39 +12,30 @@ interface RightSidebarProps {
   activeFrame: number;
   fps: number;
   onFpsChange: (fps: number) => void;
-  onionSkin: boolean;
-  onToggleOnion: (value: boolean) => void;
   duration: number;
   onDurationChange: (value: number) => void;
-  showGuides: boolean;
-  onToggleGuides: (value: boolean) => void;
-  guideMode: "face" | "fullbody";
-  onGuideModeChange: (mode: "face" | "fullbody") => void;
   transparency: TransparencyState;
   onTransparencyChange: (patch: Partial<TransparencyState>) => void;
   children?: ReactNode;
   /** Collapse the panel to its rail. */
   onCollapse?: () => void;
+  /** Extra controls at the end of "Eraser and transparency". */
+  transparencyExtra?: ReactNode;
 }
 
 function RightSidebar({
   activeFrame,
   fps,
   onFpsChange,
-  onionSkin,
-  onToggleOnion,
   duration,
   onDurationChange,
-  showGuides,
-  onToggleGuides,
-  guideMode,
-  onGuideModeChange,
 
   transparency,
   onTransparencyChange,
 
   children,
   onCollapse,
+  transparencyExtra,
 }: RightSidebarProps){
 
 
@@ -123,82 +114,9 @@ function RightSidebar({
             <span>24</span>
           </div>
         </div>
+      </div>
 
-        {/* Onion Skin */}
-        <div>
-          <div className="flex items-center justify-between">
-            <span className="text-[14px] font-medium text-ink-2">Onion skin</span>
-
-            <button
-              onClick={() => onToggleOnion(!onionSkin)}
-              role="switch"
-              aria-checked={onionSkin}
-              aria-label="Onion skin"
-              className={`relative h-7 w-12 rounded-full transition ${
-                onionSkin ? "bg-primary" : "bg-ctrl-hi"
-              }`}
-            >
-              <div
-                className={`absolute top-1 h-5 w-5 rounded-full bg-ink transition ${
-                  onionSkin ? "left-6" : "left-1"
-                }`}
-              />
-            </button>
-          </div>
-        </div>
-
-        {/* Emoji Guides */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[14px] font-medium text-ink-2">Emoji guides</span>
-
-            <button
-              onClick={() => onToggleGuides(!showGuides)}
-              role="switch"
-              aria-checked={showGuides}
-              aria-label="Emoji guides"
-              className={`relative h-7 w-12 rounded-full transition ${
-                showGuides ? "bg-primary" : "bg-ctrl-hi"
-              }`}
-            >
-              <div
-                className={`absolute top-1 h-5 w-5 rounded-full bg-ink transition ${
-                  showGuides ? "left-6" : "left-1"
-                }`}
-              />
-            </button>
-          </div>
-
-          {showGuides && (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => onGuideModeChange("face")}
-                className={`rounded-ctrl py-2 text-xs font-medium hoverable ${
-                  guideMode === "face"
-                    ? "selected text-icon-on"
-                    : "bg-ctrl text-ink"
-                }`}
-              >
-                Face
-              </button>
-
-              <button
-                onClick={() => onGuideModeChange("fullbody")}
-                className={`rounded-ctrl py-2 text-xs font-medium hoverable ${
-                  guideMode === "fullbody"
-                    ? "selected text-icon-on"
-                    : "bg-ctrl text-ink"
-                }`}
-              >
-                Full body
-              </button>
-            </div>
-          )}
-        </div>
-
-            
-  </div>
-        <div className="mt-4">
+        <div className="mt-6">
           <Accordion title="Eraser and transparency">
             <TransparencyPanel
               enabled={transparency.enabled}
@@ -212,6 +130,7 @@ function RightSidebar({
                 onTransparencyChange({ tolerance })
               }
             />
+            {transparencyExtra}
           </Accordion>
           {children}
         </div>
