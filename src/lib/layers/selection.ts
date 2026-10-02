@@ -8,7 +8,8 @@
  */
 
 import type { Layer, LayerId, LayerSelection } from "@/types/layer";
-import { EMPTY_SELECTION, isLayerEditable } from "@/types/layer";
+import { EMPTY_SELECTION, isGroupLayer, isLockedIn } from "@/types/layer";
+import { ancestorsOf } from "./groups";
 import type { Rect, Vec2 } from "@/types/geometry";
 import { RECT_EMPTY, rectCenter, rectIsEmpty, rectUnionAll } from "@/lib/geometry/rect";
 import { layerBoundsCanvas, layerContentBox } from "./layerSpace";
@@ -74,17 +75,36 @@ export function pruneSelection(
 }
 
 
+/** The layers a selection stands for: a selected group means everything
+ *  inside it (the group entry itself has no pixels to move). */
 export const selectedLayers = (
   layers: readonly Layer[],
   sel: LayerSelection
-): Layer[] => layers.filter((l) => sel.ids.includes(l.id));
+): Layer[] =>
+  layers.filter(
+    (l) =>
+      !isGroupLayer(l) &&
+      (sel.ids.includes(l.id) || ancestorsOf(layers, l).some((a) => sel.ids.includes(a.id)))
+  );
+
+/** True when `id`, or a group it sits in, is selected. */
+export const isCoveredBySelection = (
+  layers: readonly Layer[],
+  sel: LayerSelection,
+  id: LayerId
+): boolean => {
+  if (sel.ids.includes(id)) return true;
+  const layer = layers.find((l) => l.id === id);
+  return !!layer && ancestorsOf(layers, layer).some((a) => sel.ids.includes(a.id));
+};
 
 /** The layers a transform may actually touch. Locked layers stay selected —
- *  so their properties remain inspectable — but are never moved. */
+ *  so their properties remain inspectable — but are never moved, and neither
+ *  is anything inside a locked group. */
 export const transformableLayers = (
   layers: readonly Layer[],
   sel: LayerSelection
-): Layer[] => selectedLayers(layers, sel).filter(isLayerEditable);
+): Layer[] => selectedLayers(layers, sel).filter((l) => !isLockedIn(layers, l));
 
 export const primaryLayer = (
   layers: readonly Layer[],

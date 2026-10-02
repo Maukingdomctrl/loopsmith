@@ -42,6 +42,12 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
   `inverted` / `enabled` are flags. The compositor turns it into alpha (`layerMask`) and applies it with
   `destination-in`; adjustment layers use it as per-pixel strength. With the mask thumbnail picked
   (`editMask`), every paint tool paints greys into the mask through the pixel surface.
+- **Layer groups** (`lib/layers/groups.ts`): a `kind: "group"` entry in the layer array; its layers point at it
+  with `parentId` and always sit directly below it (`normalizeGroups`, run by `enforceLayerOrder`). Groups pass
+  blend modes through: `compositeLayers` calls `resolveGroups`, which drops group entries and folds group
+  visibility/opacity into their layers (unchanged when a frame has no groups). Lock checks use `isLockedIn`
+  (own or a group's lock). A selected group stands for everything inside it (`selectedLayers`). Grouping
+  linked layers, ungrouping, dropping and folding follow `linkId` across frames (`page.tsx`); Ctrl+G / Ctrl+Shift+G.
 - Tools: Pencil (P), Brush (B, opens its panel), Eraser (E), Fill (G), Picker (I), Shapes (U).
 - **Shapes** (`lib/raster/shapes.ts`, signed-distance fields): picked in the tool rail's Shapes flyout. A drag
   redraws the shape from a surface snapshot each move; release commits it to pixels like Fill (one undo step).

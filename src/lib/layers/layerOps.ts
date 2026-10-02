@@ -8,7 +8,8 @@
  */
 
 import type { Layer, LayerId, LayerKind } from "@/types/layer";
-import { isBaseLayer } from "@/types/layer";
+import { isBaseLayer, isGroupLayer } from "@/types/layer";
+import { descendantIds, lowerInGroup, normalizeGroups, raiseInGroup } from "./groups";
 import { IDENTITY_POSE, makePose, sanitizePose } from "@/lib/geometry/pose";
 import { clamp01 } from "@/lib/geometry/angle";
 import { rectNormalize } from "@/lib/geometry/rect";
@@ -82,7 +83,8 @@ export function enforceLayerOrder(layers: readonly Layer[]): Layer[] {
   // A second base can only arrive from a corrupt document; demote it rather
   // than dropping the pixels.
   const demoted = base.slice(1).map((l) => ({ ...l, kind: "raster" as const }));
-  return [...base.slice(0, 1), ...demoted, ...rest];
+  // Groups keep their layers directly below them (see groups.ts).
+  return normalizeGroups([...base.slice(0, 1), ...demoted, ...rest]);
 }
 
 /* ---------------- structure ---------------- */
@@ -99,8 +101,14 @@ export function addLayer(
 
   const next = [...layers];
   const at = aboveId ? indexOfLayer(next, aboveId) : -1;
-  if (at >= 0) next.splice(at + 1, 0, safe);
-  else next.push(safe);
+  const anchor = at >= 0 ? next[at] : null;
+  if (anchor && isGroupLayer(anchor) && !isBaseLayer(safe)) {
+    // A group is selected: the new layer goes in at its top.
+    next.splice(at, 0, { ...safe, parentId: anchor.id });
+  } else if (anchor) {
+    // Beside the selected layer, in the same group.
+    next.splice(at + 1, 0, anchor.parentId && !isBaseLayer(safe) ? { ...safe, parentId: anchor.parentId } : safe);
+  } else next.push(safe);
   return enforceLayerOrder(next);
 }
 
@@ -121,8 +129,11 @@ export function removeLayer(layers: readonly Layer[], id: LayerId): RemoveResult
   if (!target || isBaseLayer(target) || !base) {
     return { layers: [...layers], nextSelectedId: base?.id ?? id, removed: null };
   }
-  const next = layers.filter((l) => l.id !== id);
-  const fallback = next[Math.min(idx, next.length - 1)] ?? base;
+  // A group goes with everything inside it.
+  const doomed = isGroupLayer(target) ? descendantIds(layers, id) : new Set<LayerId>();
+  doomed.add(id);
+  const next = layers.filter((l) => !doomed.has(l.id));
+  const fallback = next[Math.min(idx - (doomed.size - 1), next.length - 1)] ?? base;
   return { layers: next, nextSelectedId: fallback.id, removed: target };
 }
 
@@ -134,6 +145,7 @@ export function duplicateLayer(layers: readonly Layer[], id: LayerId): {
   if (!src || layers.length >= MAX_LAYERS_PER_FRAME) {
     return { layers: [...layers], newId: null };
   }
+  if (isGroupLayer(src)) return duplicateGroup(layers, src);
   // A duplicated base becomes a raster copy directly above the base: the base
   // itself must stay unique, but the animator's intent (another copy of these
   // pixels) is still honoured.
@@ -149,6 +161,31 @@ export function duplicateLayer(layers: readonly Layer[], id: LayerId): {
     linkId: undefined,
   };
   return { layers: addLayer(layers, copy, id), newId: copy.id };
+}
+
+/** A group copies with everything inside it, as one block above the original. */
+function duplicateGroup(layers: readonly Layer[], src: Layer): { layers: Layer[]; newId: LayerId | null } {
+  const inside = descendantIds(layers, src.id);
+  if (layers.length + inside.size + 1 > MAX_LAYERS_PER_FRAME) {
+    return { layers: [...layers], newId: null };
+  }
+  const remap = new Map<LayerId, LayerId>();
+  const block = layers.filter((l) => l.id === src.id || inside.has(l.id));
+  for (const l of block) remap.set(l.id, createLayerId());
+  const copies = block.map((l) => ({
+    ...l,
+    id: remap.get(l.id)!,
+    name: l.id === src.id ? nextCopyName(layers, l.name) : l.name,
+    parentId: l.id === src.id ? l.parentId : remap.get(l.parentId!),
+    pose: { ...l.pose },
+    crop: l.crop ? { ...l.crop } : null,
+    locked: l.id === src.id ? false : l.locked,
+    linkId: undefined,
+  }));
+  const at = layers.indexOf(src) + 1;
+  const next = [...layers];
+  next.splice(at, 0, ...copies);
+  return { layers: enforceLayerOrder(next), newId: remap.get(src.id)! };
 }
 
 function nextCopyName(layers: readonly Layer[], name: string): string {
@@ -186,11 +223,12 @@ export function moveLayer(
   return enforceLayerOrder(next);
 }
 
+/** One step up or down among the layers in the same group; a group moves whole. */
 export const raiseLayer = (layers: readonly Layer[], id: LayerId): Layer[] =>
-  moveLayer(layers, id, indexOfLayer(layers, id) + 2);
+  raiseInGroup(layers, id);
 
 export const lowerLayer = (layers: readonly Layer[], id: LayerId): Layer[] =>
-  moveLayer(layers, id, indexOfLayer(layers, id) - 1);
+  lowerInGroup(layers, id);
 
 export const layerToFront = (layers: readonly Layer[], id: LayerId): Layer[] =>
   moveLayer(layers, id, layers.length);
@@ -257,7 +295,9 @@ function shallowEqualLayer(a: Layer, b: Layer): boolean {
     a.size.w === b.size.w &&
     a.size.h === b.size.h &&
     a.crop === b.crop &&
-    a.pose === b.pose
+    a.pose === b.pose &&
+    a.parentId === b.parentId &&
+    a.collapsed === b.collapsed
   );
 }
 

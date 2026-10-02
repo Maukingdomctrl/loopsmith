@@ -14,6 +14,7 @@
 
 import type { Rect, Vec2 } from "@/types/geometry";
 import type { DocumentCrop, Layer, LayerSelection } from "@/types/layer";
+import { isLockedIn } from "@/types/layer";
 import { CANVAS_SIZE } from "@/lib/frameTransform";
 import { matApply, matInvert } from "@/lib/geometry/mat2d";
 import {
@@ -63,7 +64,7 @@ export function setLayerCrop(
   localRect: Rect | null
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   if (localRect === null) return updateLayer(layers, id, { crop: null });
 
   const full = fullCropOf(layer);

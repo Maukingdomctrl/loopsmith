@@ -52,7 +52,7 @@ import { markLiveStroke, onStrokeRefine, type BitmapResolver } from "@/lib/layer
 import type { FloodFillSettings, RGBA, ShapeKind } from "@/types/raster";
 import type { Frame } from "@/types/frame";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
-import { DEFAULT_BACKGROUND } from "@/types/layer";
+import { DEFAULT_BACKGROUND, isLockedIn } from "@/types/layer";
 import type { UseLayerEditorReturn } from "@/hooks/useLayerEditor";
 import {
   domResolver,
@@ -327,7 +327,8 @@ const commit = useCallback((next: Frame) => {
    * as they did before layers existed.
    */
   const targetLayer: Layer | null =
-    editor.primary && !editor.primary.adjust ? editor.primary : base; // adjustments have no size
+    // Adjustments and groups have no size of their own.
+    editor.primary && !editor.primary.adjust && editor.primary.kind !== "group" ? editor.primary : base;
 
   /** Selection consisting solely of the base layer — the legacy drag target. */
   const baseSelection = useMemo<LayerSelection>(
@@ -444,7 +445,7 @@ const commit = useCallback((next: Frame) => {
   // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
   useEffect(() => {
     if (activeTool === "none" || activeTool === "picker") return;
-    if (!paintLayer) return;
+    if (!paintLayer || paintLayer.kind === "group") return;
 
     // A mask is plain greys: every tool paints it through the pixel surface.
     if (maskMode && paintLayer.mask) {
@@ -820,7 +821,8 @@ const commit = useCallback((next: Frame) => {
     }
 
     const local = toLocal(p.x, p.y);
-    if (!local || !paintLayer || paintLayer.locked) return true;
+    // A group has no pixels to paint; a locked group protects what is inside it.
+    if (!local || !paintLayer || paintLayer.kind === "group" || isLockedIn(editFrame.layers, paintLayer)) return true;
     if (paintLayer.adjust && !maskMode) return true;
     const lockAlpha = !maskMode && !!paintLayer.alphaLock;
 
@@ -1892,8 +1894,9 @@ const handleCanvasPointerUp = (
       // Only consume the wheel event when we are actually going to zoom.
       if (locked || !hasImage || viewRotation !== 0) return;
 
-      const layer = editor.primary ?? baseLayer(editRef.current.layers);
-      if (!layer || layer.locked) return;
+      const primary = editor.primary?.kind === "group" ? null : editor.primary;
+      const layer = primary ?? baseLayer(editRef.current.layers);
+      if (!layer || isLockedIn(editRef.current.layers, layer)) return;
 
       e.preventDefault();
 

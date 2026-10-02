@@ -17,7 +17,9 @@ import type { Rect, Vec2 } from "@/types/geometry";
 import type { Frame } from "@/types/frame";
 import type { Adjustment, BlendMode, Layer, LayerMask, LayerSelection } from "@/types/layer";
 import { BLANK_LAYER_SIZE } from "./constants";
-import { EMPTY_SELECTION } from "@/types/layer";
+import { EMPTY_SELECTION, isLockedIn } from "@/types/layer";
+import { MAX_LAYERS_PER_FRAME } from "./constants";
+import { dropLayer, groupLayers, ungroupLayer } from "./groups";
 import { clearTransforms } from "@/lib/frameTransform";
 import {
   addLayer,
@@ -84,6 +86,16 @@ export type LayerAction =
       adjust?: Adjustment;
     }
   | { type: "layer/duplicate"; id: string }
+  /* groups */
+  /** A new, empty group above the active layer (inside it, if it is a group). */
+  | { type: "layer/addGroup"; name?: string; linkId?: string }
+  /** Put these layers into a new group. */
+  | { type: "layer/group"; ids: readonly string[]; name?: string; linkId?: string }
+  | { type: "layer/ungroup"; id: string }
+  /** Panel drag-and-drop: above `targetId`, or into it when it is a group. */
+  | { type: "layer/drop"; id: string; targetId: string; into: boolean }
+  /** Fold a group shut in the panel (view state: no undo step). */
+  | { type: "layer/collapse"; id: string; value: boolean }
   | { type: "layer/remove"; id: string }
   | { type: "layer/move"; id: string; to: number }
   | { type: "layer/raise"; id: string }
@@ -144,6 +156,7 @@ export type LayerAction =
 const TRANSIENT = new Set<LayerAction["type"]>([
   "layer/setActive",
   "layer/sizeKnown",
+  "layer/collapse",
   "xf/rotateDrag",
   "xf/scaleDrag",
   "xf/move",
@@ -201,6 +214,34 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
     case "layer/back":  next = layerToBack(layers, action.id); break;
 
     /* ---- properties ---- */
+    case "layer/addGroup": {
+      const group = newGroup(layers, action.name, action.linkId);
+      next = addLayer(layers, group, frame.activeLayerId);
+      if (next.some((l) => l.id === group.id)) activeLayerId = group.id;
+      break;
+    }
+    case "layer/group": {
+      if (layers.length >= MAX_LAYERS_PER_FRAME) break;
+      const group = newGroup(layers, action.name, action.linkId);
+      next = groupLayers(layers, action.ids, group);
+      if (next.some((l) => l.id === group.id)) activeLayerId = group.id;
+      break;
+    }
+    case "layer/ungroup": {
+      const group = findLayer(layers, action.id);
+      next = ungroupLayer(layers, action.id);
+      if (group && activeLayerId === group.id) {
+        const firstChild = layers.filter((l) => l.parentId === group.id).pop();
+        activeLayerId = firstChild?.id ?? next[next.length - 1].id;
+      }
+      break;
+    }
+    case "layer/drop":
+      next = dropLayer(layers, action.id, action.targetId, action.into);
+      break;
+    case "layer/collapse":
+      next = updateLayer(layers, action.id, { collapsed: action.value || undefined });
+      break;
     case "layer/rename":  next = renameLayer(layers, action.id, action.name); break;
     case "layer/visible": next = setLayerVisible(layers, action.id, action.value); break;
     case "layer/locked":  next = setLayerLocked(layers, action.id, action.value); break;
@@ -287,7 +328,7 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
     case "xf/scaleTo": next = setLayerScale(layers, action.id, action.scale); break;
     case "xf/hop": {
       const l = findLayer(layers, action.id);
-      if (!l || l.locked) break;
+      if (!l || isLockedIn(layers, l)) break;
       const delta = action.height - (l.hop ?? 0);
       if (delta === 0) break;
       next = updateLayer(layers, l.id, {
@@ -298,7 +339,7 @@ export function layerReducer(frame: Frame, action: LayerAction): Frame {
     }
     case "xf/squash": {
       const l = findLayer(layers, action.id);
-      if (l && !l.locked) next = updateLayer(layers, l.id, { pose: squashPose(l, action.stretch, action.anchor) });
+      if (l && !isLockedIn(layers, l)) next = updateLayer(layers, l.id, { pose: squashPose(l, action.stretch, action.anchor) });
       break;
     }
     case "xf/zoomTo":  next = setLayerZoom(layers, action.id, action.zoom, action.baseScale); break;
@@ -375,4 +416,11 @@ export function reduceSelectionForFrame(
   const pruned = pruneSelection(frame.layers, selection);
   if (pruned.ids.length > 0) return pruned;
   return frame.activeLayerId ? selectOnly(frame.activeLayerId) : EMPTY_SELECTION;
+}
+
+/** A fresh, empty group: no pixels, no size, named after how many exist. */
+function newGroup(layers: readonly Layer[], name?: string, linkId?: string): Layer {
+  const n = layers.filter((l) => l.kind === "group").length + 1;
+  const group = createLayer({ kind: "group", name: name ?? `Group ${n}`, size: { w: 0, h: 0 } });
+  return linkId ? { ...group, linkId } : group;
 }

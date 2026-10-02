@@ -10,6 +10,7 @@
 
 import type { Mat2D, Rect, Vec2 } from "@/types/geometry";
 import type { Layer, LayerSelection } from "@/types/layer";
+import { isLockedIn } from "@/types/layer";
 import {
   angleBetweenPoints,
   angleDelta,
@@ -95,7 +96,7 @@ export function setLayerPosition(
   position: Vec2
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   return updateLayer(layers, id, {
     pose: makePose({ ...layer.pose, position }),
   });
@@ -150,7 +151,7 @@ export function setLayerRotation(
   deg: number
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   return updateLayer(layers, id, {
     pose: makePose({ ...layer.pose, rotation: normalizeAngle(deg) }),
   });
@@ -259,7 +260,7 @@ export function setLayerScale(
   scale: Vec2
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   return updateLayer(layers, id, {
     pose: makePose({ ...layer.pose, scale: clampScale(scale) }),
   });
@@ -293,7 +294,7 @@ export function beginScale(
   pointerCanvas: Vec2
 ): ScaleGesture | null {
   const layer = layers.find((l) => l.id === sel.primary);
-  if (!layer || layer.locked) return null;
+  if (!layer || isLockedIn(layers, layer)) return null;
   const opposite = OPPOSITE_HANDLE[handle];
   if (!opposite) return null;
 
@@ -382,7 +383,7 @@ export function fitLayerToCanvas(
   id: string
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   const box = layerContentBox(layer);
   if (rectIsEmpty(box)) return layers as Layer[];
   const s = containScale(box.w, box.h, CANVAS_SIZE, CANVAS_SIZE);
@@ -402,7 +403,7 @@ export const flipLayer = (
   axis: "x" | "y"
 ): Layer[] => {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   return updateLayer(layers, id, {
     pose: makePose({
       ...layer.pose,
@@ -422,7 +423,7 @@ export function setLayerPivotCanvas(
   pointCanvas: Vec2
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
 
   const inv = layerMatrix(layer);
   const i = matInvert(inv);
@@ -441,7 +442,7 @@ export function setLayerPivotAnchor(
   anchor: Vec2
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   const local = pivotFromAnchor(layerContentBox(layer), anchor);
   return updateLayer(layers, id, { pose: repinPivot(layer.pose, local) });
 }
@@ -453,7 +454,7 @@ export function resetLayerTransform(
   id: string
 ): Layer[] {
   const layer = layers.find((l) => l.id === id);
-  if (!layer || layer.locked) return layers as Layer[];
+  if (!layer || isLockedIn(layers, layer)) return layers as Layer[];
   const pose = layer.size.w > 0 && layer.size.h > 0
     ? makePose(defaultFitPose(layer.size.w, layer.size.h))
     : IDENTITY_POSE;
