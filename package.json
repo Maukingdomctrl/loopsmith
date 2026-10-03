@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "brush:check": "node --experimental-strip-types --no-warnings --import ./scripts/brush-check/register.mjs scripts/brush-check/index.ts"
   },
   "dependencies": {
     "gif.js.optimized": "^1.0.1",
