@@ -42,6 +42,10 @@ export interface LayerBitmap {
   readonly image: CanvasImageSource;
   readonly width: number;
   readonly height: number;
+  /** Resampling quality for this bitmap, when it must differ from the
+   *  compositor's own (a live preview matching how the committed image will
+   *  be drawn). */
+  readonly quality?: ImageSmoothingQuality;
 }
 
 export type BitmapResolver = (layer: Layer) => LayerBitmap | null;
@@ -446,7 +450,7 @@ function drawLayer(
     ctx.globalCompositeOperation = "source-over";
     ctx.imageSmoothingEnabled = smoothing;
     if ("imageSmoothingQuality" in ctx) {
-      (ctx as CanvasRenderingContext2D).imageSmoothingQuality = "high";
+      (ctx as CanvasRenderingContext2D).imageSmoothingQuality = bitmap.quality ?? "high";
     }
     matSetTransform(ctx as CanvasRenderingContext2D, matrix);
     drawCropped(ctx, bitmap, box);
@@ -463,6 +467,7 @@ function drawLayer(
 
   iso.ctx.save();
   iso.ctx.imageSmoothingEnabled = smoothing;
+  if (bitmap.quality) iso.ctx.imageSmoothingQuality = bitmap.quality;
   matSetTransform(iso.ctx as CanvasRenderingContext2D, matrix);
   drawCropped(iso.ctx, bitmap, box);
   iso.ctx.restore();

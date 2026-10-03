@@ -287,10 +287,11 @@ export class MaterialStroke {
   /**
    * Show the stroke so far. Only pixels the model changed since the previous
    * preview are recomposited (from the pre-stroke pixels, so nothing ever
-   * darkens past the true result).
+   * darkens past the true result). Returns the rect it recomposited, so a
+   * display can refresh just that, or null if nothing changed.
    */
-  previewInto(target: RasterSurface = this.surface): void {
-    if (this.ended) return;
+  previewInto(target: RasterSurface = this.surface): Rect | null {
+    if (this.ended) return null;
     let region = this.takeChanged();
 
     // A different target holds none of what was drawn before: redo everything.
@@ -299,12 +300,13 @@ export class MaterialStroke {
       if (!rectIsEmpty(all)) region = all;
       this.lastTarget = target;
     }
-    if (!region) return;
+    if (!region) return null;
 
     this.restoreBaseline(target, region);
     this.compositeRegion(target, region);
     if (this.options.lockAlpha) target.keepAlpha(this.baseline, region);
     target.dirty.addRect(region);
+    return region;
   }
 
   /** Commit. Returns the touched region, or null if nothing was drawn. */

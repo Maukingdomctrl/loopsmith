@@ -588,20 +588,28 @@ export class RasterSurface {
    * 1e-7 — numerically explosive. Snapping first keeps the output clean and
    * makes erased regions bit-exactly transparent, which the LSA decoder's
    * premultiplication step relies on.
+   *
+   * `region` converts just that rect (the same bytes the full conversion
+   * would give there) — what a live preview needs after a stroke changes a
+   * few pixels of a large surface.
    */
-  toImageData(): { data: Uint8ClampedArray; width: number; height: number } {
-    const n = this.width * this.height;
-    const out = new Uint8ClampedArray(n * 4);
-    for (let i = 0, p = 0; i < n; i++, p += 4) {
-      const a = this.data[p + 3];
-      if (a <= ALPHA_SNAP) continue; // leaves 0,0,0,0
-      const inv = 1 / a;
-      out[p]     = to8(this.data[p]     * inv);
-      out[p + 1] = to8(this.data[p + 1] * inv);
-      out[p + 2] = to8(this.data[p + 2] * inv);
-      out[p + 3] = to8(a);
+  toImageData(region?: Rect): { data: Uint8ClampedArray<ArrayBuffer>; width: number; height: number } {
+    const r = region ? this.clipRect(region) : rect(0, 0, this.width, this.height);
+    const out = new Uint8ClampedArray(new ArrayBuffer(r.w * r.h * 4));
+    for (let y = 0; y < r.h; y++) {
+      let p = this.index(r.x, r.y + y);
+      let q = y * r.w * 4;
+      for (let x = 0; x < r.w; x++, p += CHANNELS, q += 4) {
+        const a = this.data[p + 3];
+        if (a <= ALPHA_SNAP) continue; // leaves 0,0,0,0
+        const inv = 1 / a;
+        out[q]     = to8(this.data[p]     * inv);
+        out[q + 1] = to8(this.data[p + 1] * inv);
+        out[q + 2] = to8(this.data[p + 2] * inv);
+        out[q + 3] = to8(a);
+      }
     }
-    return { data: out, width: this.width, height: this.height };
+    return { data: out, width: r.w, height: r.h };
   }
 
   /** Commit to a PNG data URL, ready for `layer/setImage`. */
