@@ -77,14 +77,30 @@ export const MAX_SPACING_FRACTION = 4;
  *  but controlled stroke on a 512 px canvas. */
 export const SPEED_REFERENCE = 1.5;
 
-/** Exponential smoothing pole for the velocity estimate. Raw per-event speed
- *  is far too noisy to drive size. */
-export const SPEED_SMOOTHING = 0.6;
+/** Time constant of the velocity estimate, ms. Raw per-event speed is far too
+ *  noisy to drive size. Defined in time rather than per event, so a 60 Hz
+ *  device reaches the hand's speed as quickly as a 240 Hz one (a per-event pole
+ *  took a 60 Hz stroke a hundred pixels to "get up to speed"). 8 ms matches the
+ *  old per-event 0.6 at 240 Hz. */
+export const SPEED_SMOOTHING_MS = 8;
+
+/** Width (σ, ms) of the zero-lag pressure smoothing between neighbouring
+ *  samples. Digitizers report slightly noisy pressure; a causal low-pass would
+ *  fix that only by making the stroke swell late — by several pixels on a
+ *  quick stroke from a fast-reporting pen. Weights fall off with the time
+ *  between samples, so a 60 Hz device is left essentially unsmoothed. */
+export const PRESSURE_SMOOTHING_MS = 3;
 
 /** Input smoothing: maximum fraction of the way a sample is pulled toward the
  *  running average at smoothing = 1. Capped below 1 so the stroke can never
  *  stop tracking the pointer entirely. */
 export const MAX_INPUT_SMOOTHING = 0.85;
+
+/** Pointer step, in CANVAS px, at which input smoothing has eased to half its
+ *  strength. Jitter and mouse steps are about a pixel; a hand moving two or
+ *  more pixels per sample is drawing, and is followed rather than averaged —
+ *  otherwise a quick curve is cut short by the filter's lag. */
+export const SMOOTHING_RELEASE = 2;
 
 /** Catmull-Rom knot exponent. 0.5 = centripetal: provably free of cusps and
  *  self-intersections within a segment (Yuksel et al.), which uniform CR is

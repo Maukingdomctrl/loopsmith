@@ -30,7 +30,9 @@ import {
   MAX_INPUT_SMOOTHING,
   MIN_SAMPLE_DISTANCE,
   MIN_SPACING_PX,
-  SPEED_SMOOTHING,
+  PRESSURE_SMOOTHING_MS,
+  SMOOTHING_RELEASE,
+  SPEED_SMOOTHING_MS,
 } from "./constants";
 import { clamp } from "@/lib/geometry/scalar";
 
@@ -56,6 +58,11 @@ export interface CubicSegment {
 
   /** Monotonic t → arc-length table, ARCLEN_SUBDIVISIONS + 1 entries. */
   readonly lut: Float64Array;
+
+  /** Hermite tangents of pressure at p0 and p3, per unit of the segment's
+   *  arc-length fraction (see `pressureTangents`). */
+  readonly pressureT0: number;
+  readonly pressureT1: number;
 }
 
 export interface SampleDynamics {
@@ -168,6 +175,26 @@ function tAtLength(s: CubicSegment, target: number): number {
   return t;
 }
 
+/**
+ * Cubic Hermite interpolation of a scalar between two knots, f ∈ [0, 1].
+ *
+ * Pressure is interpolated this way rather than linearly. A linear ramp
+ * between samples is continuous, but its slope jumps at every sample, so a
+ * swelling or tapering stroke has a faint polygonal outline with a corner at
+ * each pointer event — most visible on fast strokes, where events are far
+ * apart. With tangents from `pressureTangents` the width is C¹ along the whole
+ * stroke and never overshoots the reported pressures.
+ */
+function hermite(f: number, p0: number, p1: number, t0: number, t1: number): number {
+  const f2 = f * f, f3 = f2 * f;
+  return (
+    (2 * f3 - 3 * f2 + 1) * p0 +
+    (f3 - 2 * f2 + f) * t0 +
+    (-2 * f3 + 3 * f2) * p1 +
+    (f3 - f2) * t1
+  );
+}
+
 /** Short-span polyline length, for Newton's residual. */
 function approximateLength(s: CubicSegment, tA: number, tB: number): number {
   if (tB <= tA) return 0;
@@ -254,6 +281,8 @@ export class StrokePath {
   private totalLength = 0;
   /** Arc length already consumed by emitted stamps. */
   private emitted = 0;
+  /** Arc length of the last emitted stamp; -1 before the first. */
+  private lastEmitted = -1;
 
   private smoothed: Vec2 | null = null;
   private lastRaw: StrokeSample | null = null;
@@ -261,10 +290,18 @@ export class StrokePath {
 
   private readonly smoothing: number;
   private readonly alpha: number;
+  /** One canvas pixel, in the path's (layer) units. */
+  private readonly canvasPx: number;
 
-  constructor(smoothing: number, curveAlpha = CURVE_ALPHA_CENTRIPETAL) {
+  /**
+   * @param canvasPx  Size of one canvas pixel in path units (1 / layer scale).
+   *                  Input smoothing works in canvas pixels, so it behaves the
+   *                  same at every zoom.
+   */
+  constructor(smoothing: number, curveAlpha = CURVE_ALPHA_CENTRIPETAL, canvasPx = 1) {
     this.smoothing = clamp(smoothing, 0, 1) * MAX_INPUT_SMOOTHING;
     this.alpha = clamp(curveAlpha, 0, 1);
+    this.canvasPx = canvasPx > 0 ? canvasPx : 1;
   }
 
   get length(): number { return this.totalLength; }
@@ -282,8 +319,10 @@ export class StrokePath {
    * up while holding still is not lost.
    */
   addSample(sample: StrokeSample): boolean {
+    const prev = this.lastRaw;
+    const step = prev ? Math.hypot(sample.x - prev.x, sample.y - prev.y) : 0;
     const dyn = this.updateDynamics(sample);
-    const point = this.applySmoothing(sample);
+    const point = this.applySmoothing(sample, step);
 
     if (this.knots.length > 0) {
       const prev = this.knots[this.knots.length - 1];
@@ -309,14 +348,26 @@ export class StrokePath {
     return true;
   }
 
-  /** One-pole low-pass on position. Removes stylus jitter and mouse stair-stepping. */
-  private applySmoothing(s: StrokeSample): Vec2 {
+  /**
+   * One-pole low-pass on position. Removes stylus jitter and mouse stair-stepping.
+   *
+   * SPEED-ADAPTIVE, in the spirit of the 1€ filter (Casiez et al.). A fixed
+   * per-sample pull makes each knot trail the pointer by a fixed FRACTION of the
+   * step, so the faster the hand (or the slower the device's report rate), the
+   * more pixels the curve lags and the more it cuts the corners of what was
+   * actually drawn — 2 px and more on a quick curve. Jitter and mouse steps are
+   * about a pixel in size; movement much larger than that is the hand, not
+   * noise. So the pull fades as the step grows past SMOOTHING_RELEASE canvas px:
+   * slow strokes are smoothed as before, fast ones follow the pen.
+   */
+  private applySmoothing(s: StrokeSample, step: number): Vec2 {
     const raw = { x: s.x, y: s.y };
     if (!this.smoothed || this.smoothing <= 0) {
       this.smoothed = raw;
       return raw;
     }
-    const k = this.smoothing;
+    const u = step / (this.canvasPx * SMOOTHING_RELEASE);
+    const k = this.smoothing / (1 + u * u);
     const next = {
       x: this.smoothed.x + (raw.x - this.smoothed.x) * (1 - k),
       y: this.smoothed.y + (raw.y - this.smoothed.y) * (1 - k),
@@ -332,7 +383,8 @@ export class StrokePath {
       const dt = Math.max(1, s.time - this.lastRaw.time);
       const dist = Math.hypot(s.x - this.lastRaw.x, s.y - this.lastRaw.y);
       const instant = dist / dt;
-      this.speed = this.speed * SPEED_SMOOTHING + instant * (1 - SPEED_SMOOTHING);
+      const k = Math.exp(-dt / SPEED_SMOOTHING_MS);
+      this.speed = this.speed * k + instant * (1 - k);
     }
     this.lastRaw = s;
     return {
@@ -384,14 +436,84 @@ export class StrokePath {
     const startDistance = this.totalLength;
     this.totalLength += length;
 
+    const j = i + 1 < this.dynamics.length ? i + 1 : i;
+    const startDynamics = { ...this.dynamics[i], pressure: this.smoothPressure(i) };
+    const endDynamics = { ...this.dynamics[j], pressure: this.smoothPressure(j) };
+    const [pressureT0, pressureT1] = this.pressureTangents(
+      i, startDynamics.pressure, endDynamics.pressure, length
+    );
+
     return {
       p0: p1, p1: c1, p2: c2, p3: p2,
-      startDynamics: this.dynamics[i],
-      endDynamics: this.dynamics[i + 1] ?? this.dynamics[i],
+      startDynamics,
+      endDynamics,
       startDistance,
       length,
       lut,
+      pressureT0,
+      pressureT1,
     };
+  }
+
+  /**
+   * Pressure at knot i, smoothed with its neighbours by a Gaussian in TIME.
+   * Symmetric, so it adds no lag: the knot after i always exists by the time a
+   * segment ending at i is built (see `rebuildTail`).
+   */
+  private smoothPressure(i: number): number {
+    const d = this.dynamics;
+    let sum = d[i].pressure, weight = 1;
+    for (const j of [i - 1, i + 1]) {
+      if (j < 0 || j >= d.length) continue;
+      const dt = (d[j].time - d[i].time) / PRESSURE_SMOOTHING_MS;
+      const w = Math.exp(-0.5 * dt * dt);
+      sum += w * d[j].pressure;
+      weight += w;
+    }
+    return sum / weight;
+  }
+
+  /**
+   * Pressure slope at knot i, per px of travel: the shape-preserving (PCHIP,
+   * Fritsch–Butland) estimate from the chords on either side. Zero at a local
+   * peak or dip, so the interpolated pressure never overshoots what the pen
+   * reported; one-sided at the ends of the stroke.
+   */
+  private pressureSlope(i: number): number {
+    const k = this.knots, d = this.dynamics;
+    const h0 = i > 0 ? Math.hypot(k[i].x - k[i - 1].x, k[i].y - k[i - 1].y) : 0;
+    const h1 = i + 1 < k.length ? Math.hypot(k[i + 1].x - k[i].x, k[i + 1].y - k[i].y) : 0;
+    const s0 = h0 > KNOT_EPSILON ? (d[i].pressure - d[i - 1].pressure) / h0 : null;
+    const s1 = h1 > KNOT_EPSILON ? (d[i + 1].pressure - d[i].pressure) / h1 : null;
+    if (s0 === null) return s1 ?? 0;
+    if (s1 === null) return s0;
+    if (s0 * s1 <= 0) return 0;
+    const w0 = 2 * h1 + h0, w1 = h1 + 2 * h0;
+    return (w0 + w1) / (w0 / s0 + w1 / s1);
+  }
+
+  /**
+   * Hermite tangents of pressure for segment i (knot i → i+1), scaled to the
+   * segment's length, and limited so the cubic stays monotone between the two
+   * knots (Fritsch–Carlson: the tangents, relative to the secant, must lie in
+   * the circle of radius 3).
+   */
+  private pressureTangents(i: number, p0: number, p1: number, length: number): [number, number] {
+    const delta = p1 - p0;
+    if (length <= KNOT_EPSILON || Math.abs(delta) < 1e-12) return [0, 0];
+    let t0 = this.pressureSlope(i) * length;
+    let t1 = (i + 1 < this.knots.length ? this.pressureSlope(i + 1) : 0) * length;
+    // a tangent against the secant would dip outside the two knots' range
+    if (t0 * delta < 0) t0 = 0;
+    if (t1 * delta < 0) t1 = 0;
+    const a = t0 / delta, b = t1 / delta;
+    const r2 = a * a + b * b;
+    if (r2 > 9) {
+      const s = 3 / Math.sqrt(r2);
+      t0 *= s;
+      t1 *= s;
+    }
+    return [t0, t1];
   }
 
   /**
@@ -437,8 +559,12 @@ export class StrokePath {
    * `spacingAt` receives the interpolated dynamics so spacing can track a
    * pressure-varying radius — a tapering stroke must not thin out its stamp
    * density as it narrows.
+   *
+   * `final` (after `finish`) also emits the exact end of the path. Stamps fall
+   * on a fixed spacing grid, so otherwise the last one lands anywhere up to one
+   * spacing short of where the pen lifted, and the stroke ends early and blunt.
    */
-  emitStamps(spacingAt: (p: StrokePoint) => number): StrokePoint[] {
+  emitStamps(spacingAt: (p: StrokePoint) => number, final = false): StrokePoint[] {
     const out: StrokePoint[] = [];
     if (this.segments.length === 0) return out;
 
@@ -447,6 +573,7 @@ export class StrokePath {
       const first = this.pointAtDistance(0);
       if (first) {
         out.push(first);
+        this.lastEmitted = 0;
         this.emitted = Math.max(MIN_SPACING_PX, spacingAt(first));
       }
     }
@@ -457,7 +584,19 @@ export class StrokePath {
       const p = this.pointAtDistance(this.emitted);
       if (!p) break;
       out.push(p);
+      this.lastEmitted = this.emitted;
       this.emitted += Math.max(MIN_SPACING_PX, spacingAt(p));
+    }
+
+    if (final && this.totalLength - this.lastEmitted > 1e-6) {
+      const end = this.pointAtDistance(this.totalLength);
+      if (end) {
+        // callers build their dab inside `spacingAt`: it runs once per point
+        spacingAt(end);
+        out.push(end);
+        this.lastEmitted = this.totalLength;
+        this.emitted = Infinity;
+      }
     }
     return out;
   }
@@ -490,7 +629,7 @@ export class StrokePath {
       y: pos.y,
       distance: d,
       tangent: tan,
-      pressure: a.pressure + (b.pressure - a.pressure) * f,
+      pressure: clamp(hermite(f, a.pressure, b.pressure, seg.pressureT0, seg.pressureT1), 0, 1),
       tilt: a.tilt + (b.tilt - a.tilt) * f,
       twist: a.twist + (b.twist - a.twist) * f,
       speed: a.speed + (b.speed - a.speed) * f,
