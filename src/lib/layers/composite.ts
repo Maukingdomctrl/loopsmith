@@ -139,7 +139,9 @@ export function compositeLayers(
   ctx.clearRect(0, 0, surface, surface);
 
   if (options.drawCheckerboard && background.checkerboard && background.transparent) {
-    drawCheckerboard(ctx, surface);
+    // squares keep their on-screen size at any surface density; whole pixels,
+    // so neighbouring squares never blend at a fractional edge
+    drawCheckerboard(ctx, surface, Math.max(1, Math.round((CHECKER_SIZE * surface) / CANVAS_SIZE)));
   }
 
   // Opaque background is DOCUMENT state and is therefore exported.

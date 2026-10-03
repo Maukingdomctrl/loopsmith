@@ -136,6 +136,9 @@ interface CanvasProps {
 }
 
 const ZOOM_MIN = 0.25;
+/** The stage canvases render at the screen's own pixel density, up to this
+ *  many backing pixels per canvas px (a 1536² ceiling keeps playback cheap). */
+const MAX_STAGE_DENSITY = 3;
 const ZOOM_MAX = 8;
 const SAVE_DEBOUNCE_MS = 500;
 /** Size of a fresh drawing sheet on an empty frame. */
@@ -400,6 +403,31 @@ const commit = useCallback((next: Frame) => {
     return () => ro.disconnect();
   }, []);
   const stagePx = Math.max(240, Math.min(stageSize, stageRoom));
+
+  // Screen pixels per CSS px. It changes with browser zoom and when the window
+  // moves to another display; each change re-arms a query for the new value.
+  const [dpr, setDpr] = useState(1);
+  useEffect(() => {
+    let mq: MediaQueryList | null = null;
+    const update = () => {
+      setDpr(window.devicePixelRatio || 1);
+      mq?.removeEventListener("change", update);
+      mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      mq.addEventListener("change", update);
+    };
+    update();
+    return () => mq?.removeEventListener("change", update);
+  }, []);
+  /**
+   * Backing size of the stage canvases, in device pixels. The document is laid
+   * out in CANVAS_SIZE units; rendering it at the size it is actually shown
+   * (stage scale × device pixel ratio) means nothing is stretched after the
+   * fact: pencil strokes and edges are drawn at screen resolution, and layer
+   * bitmaps are resampled once, straight to the screen's pixels.
+   */
+  const stageRes = Math.round(
+    CANVAS_SIZE * Math.min(MAX_STAGE_DENSITY, Math.max(1, (stagePx / CANVAS_SIZE) * dpr))
+  );
   /** Shapes: which one, solid or outline, and the outline width in canvas px. */
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [shapeFill, setShapeFill] = useState(false);
@@ -649,7 +677,7 @@ const commit = useCallback((next: Frame) => {
           ? { layerId: liveId, image: scratch!, width: scratch!.width, height: scratch!.height }
           : dom(l);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       drawFrameLayers(
         ctx,
         {
@@ -664,7 +692,7 @@ const commit = useCallback((next: Frame) => {
                 : { ...l, image: "live" }
           ),
         },
-        CANVAS_SIZE,
+        canvas.width,
         { background, resolve, checkerboard: true, smoothing: true }
       );
       return;
@@ -680,7 +708,7 @@ const commit = useCallback((next: Frame) => {
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawFrameLayers(
       ctx,
       {
@@ -689,7 +717,7 @@ const commit = useCallback((next: Frame) => {
           l.id === paintLayer.id ? { ...l, strokes: [...(l.strokes ?? []), live.stroke] } : l
         ),
       },
-      CANVAS_SIZE,
+      canvas.width,
       { background, resolve: domResolver(), checkerboard: true, smoothing: true }
     );
   }, [paintLayer, background, maskMode]);
@@ -824,11 +852,13 @@ const commit = useCallback((next: Frame) => {
     const p = screenToCanvas({ x: e.clientX, y: e.clientY }, rect, view);
 
     if (activeTool === "picker") {
-      const ctx = baseCanvasRef.current?.getContext("2d");
-      if (ctx) {
+      const stage = baseCanvasRef.current;
+      const ctx = stage?.getContext("2d");
+      if (stage && ctx) {
+        const k = stage.width / CANVAS_SIZE;
         const d = ctx.getImageData(
-          Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(p.x))),
-          Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(p.y))),
+          Math.max(0, Math.min(stage.width - 1, Math.floor(p.x * k))),
+          Math.max(0, Math.min(stage.height - 1, Math.floor(p.y * k))),
           1,
           1
         ).data;
@@ -1354,19 +1384,18 @@ const commit = useCallback((next: Frame) => {
 
   // Always repaint from a clean surface.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Layer pixels are resampled smoothly, as the GIF export does: drawn
-  // nearest-neighbour, any layer that is zoomed, scaled or nudged by a
-  // fraction of a pixel turns its anti-aliased edges into uneven blocks.
-  // The lasso is the exception: it cuts pixels out of this canvas and writes
-  // them back at the layer's own size, so it keeps the unresampled ones.
-  drawFrameLayers(ctx, frame, CANVAS_SIZE, {
+  // Drawn at the screen's pixel density (stageRes), and layer pixels are
+  // resampled smoothly, as the GIF export does: drawn nearest-neighbour, any
+  // layer that is zoomed, scaled or nudged by a fraction of a pixel turns its
+  // anti-aliased edges into uneven blocks.
+  drawFrameLayers(ctx, frame, canvas.width, {
     background,
     resolve: domResolver(),
     checkerboard: true,
     interactive: true,
-    smoothing: !lassoMode && !selectionActive,
+    smoothing: true,
   });
   }, [
       frame,
@@ -1379,8 +1408,7 @@ const commit = useCallback((next: Frame) => {
       view.y,
     view.rotation,
     decodeGeneration,
-    lassoMode,
-    selectionActive,
+    stageRes,
   ]);
 
   /* ---------- Onion skin (honours each neighbour's own transform) ---------- */
@@ -1392,14 +1420,15 @@ const commit = useCallback((next: Frame) => {
     const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
+    const size = canvas.width;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    ctx.clearRect(0, 0, size, size);
 
     if (!onionSkin || !onionFrames.length) return;
 
     const scratch = (onionScratch.current ??= document.createElement("canvas"));
-    scratch.width = CANVAS_SIZE;
-    scratch.height = CANVAS_SIZE;
+    scratch.width = size;
+    scratch.height = size;
     const sctx = scratch.getContext("2d");
     if (!sctx) return;
 
@@ -1411,8 +1440,8 @@ const commit = useCallback((next: Frame) => {
       sctx.setTransform(1, 0, 0, 1, 0, 0);
       sctx.globalCompositeOperation = "source-over";
       sctx.globalAlpha = 1;
-      sctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-      drawFrameLayers(sctx, neighbour, CANVAS_SIZE, {
+      sctx.clearRect(0, 0, size, size);
+      drawFrameLayers(sctx, neighbour, size, {
         background: ONION_BACKGROUND,
         resolve: domResolver(),
         checkerboard: false,
@@ -1423,13 +1452,13 @@ const commit = useCallback((next: Frame) => {
       sctx.globalCompositeOperation = "source-atop";
       sctx.globalAlpha = 0.65;
       sctx.fillStyle = offset < 0 ? ONION_BEFORE : ONION_AFTER;
-      sctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      sctx.fillRect(0, 0, size, size);
 
       ctx.globalAlpha = Math.max(0.25, 1 - (Math.abs(offset) - 1) * 0.18);
       ctx.drawImage(scratch, 0, 0);
     }
     ctx.globalAlpha = 1;
-  }, [onionSkin, onionFrames, decodeGeneration]);
+  }, [onionSkin, onionFrames, decodeGeneration, stageRes]);
 
   /* ---------- Floating selection layer ---------- */
 
@@ -1514,12 +1543,22 @@ const commit = useCallback((next: Frame) => {
 
   const createSelection = useCallback(() => {
     if (!lassoAvailable) return;
+    if (points.length < 3) return;
 
-    const source = baseCanvasRef.current;
-    if (!source || points.length < 3) return;
-
+    // The cut works on the document's own 512 px grid, with layer pixels
+    // unresampled, so the hole and the piece go back into the layer exactly.
+    // The stage canvas is drawn at screen density, so the lasso renders its
+    // own copy rather than reading that one.
+    const source = document.createElement("canvas");
+    source.width = CANVAS_SIZE;
+    source.height = CANVAS_SIZE;
     const srcCtx = source.getContext("2d");
     if (!srcCtx) return;
+    drawFrameLayers(srcCtx, frame, CANVAS_SIZE, {
+      background,
+      resolve: domResolver(),
+      checkerboard: true,
+    });
 
     const minX = Math.max(0, Math.floor(Math.min(...points.map((p) => p.x))));
     const minY = Math.max(0, Math.floor(Math.min(...points.map((p) => p.y))));
@@ -1599,7 +1638,7 @@ const commit = useCallback((next: Frame) => {
 
     setLassoMode(false);
     setPoints([]);
-  }, [lassoAvailable, points, commit, writeBaseImage]);
+  }, [lassoAvailable, points, commit, writeBaseImage, frame, background]);
 
   /**
    * Downscale a 512-space composite back to the frame's NATIVE bitmap size.
@@ -2184,8 +2223,8 @@ onPointerCancel={(e) => {
             
             <canvas
   ref={baseCanvasRef}
-  width={CANVAS_SIZE}
-  height={CANVAS_SIZE}
+  width={stageRes}
+  height={stageRes}
   className="absolute inset-0 h-full w-full"
   onPointerDown={(e) => {
     if (paintDown(e)) return;
@@ -2268,8 +2307,8 @@ onPointerCancel={(e) => {
             {/* Onion skin: drawn through the same transform pipeline as the base. */}
             <canvas
               ref={onionCanvasRef}
-              width={CANVAS_SIZE}
-              height={CANVAS_SIZE}
+              width={stageRes}
+              height={stageRes}
               className="pointer-events-none absolute inset-0 h-full w-full opacity-30"
             />
 
