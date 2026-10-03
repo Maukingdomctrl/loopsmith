@@ -54,3 +54,6 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 - Every paint edit is one undo step (`onHistoryCommit`) and sets `flattenKey: null`.
 - Background is document state (`CanvasBackground`); checkerboard is view-only and never exported.
 - Page layout is a fixed flex frame (Toolbar / sidebars / Canvas / Timeline). Nothing should shift size.
+- **Per-frame cost while drawing is mostly the browser's**, not the brush engine's: never set React state on
+  pointer moves (the brush cursor's element is moved in place), and never leave a still 2D canvas on the page
+  (each frame copies every 2D canvas to the compositor; the onion skin is shown through a `bitmaprenderer`).

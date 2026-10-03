@@ -8,6 +8,7 @@
  */
 
 import type { Frame } from "@/types/frame";
+import type { Rect } from "@/types/geometry";
 import type { RenderTransform } from "@/lib/frameTransform";
 import { CANVAS_SIZE, fitScale, renderTransform } from "@/lib/frameTransform";
 import { compositeLayers, type BitmapResolver } from "@/lib/layers/composite";
@@ -64,6 +65,8 @@ export function drawFrameLayers(
     checkerboard?: boolean;
     smoothing?: boolean;
     interactive?: boolean;
+    /** The part of the surface being redrawn; the caller has clipped to it. */
+    region?: Rect | null;
   } = {}
 ): void {
   compositeLayers(ctx, frame.layers, opts.resolve ?? domResolver(), {
@@ -75,5 +78,6 @@ export function drawFrameLayers(
     onlyLayerIds: null,
     smoothing: opts.smoothing ?? false,
     interactive: opts.interactive ?? false,
+    region: opts.region ?? null,
   });
 }
