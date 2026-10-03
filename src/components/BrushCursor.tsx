@@ -10,15 +10,23 @@
  *
  * Pointer-events are disabled throughout. A cursor that can be clicked would
  * swallow the very events the tools need.
+ *
+ * The SVG is anchored at the tip and placed with a CSS translate, so the
+ * canvas can move it on every pointer sample by writing `cursorTransform`
+ * to the element (see Canvas) instead of re-rendering the editor.
  */
 
-import { useMemo } from "react";
+import { useMemo, type Ref } from "react";
 import { cursorArt } from "@/styles/tokens";
 import type { Vec2 } from "@/types/geometry";
 import type { BrushCursorShape } from "@/types/raster";
-import { CANVAS_SIZE } from "@/lib/frameTransform";
+
+/** The CSS transform that puts the cursor's tip at a canvas-space point. */
+export const cursorTransform = (p: Vec2): string => `translate(${p.x}px, ${p.y}px)`;
 
 interface Props {
+  /** The cursor's element, for moving it without a render. */
+  ref?: Ref<SVGSVGElement>;
   /** Canvas-space centre. null hides the cursor. */
   position: Vec2 | null;
   /** Radius in CANVAS px — already converted via localRadiusToCanvas. */
@@ -37,6 +45,7 @@ interface Props {
 
 
 export default function BrushCursor({
+  ref,
   position,
   radius,
   angle = 0,
@@ -68,12 +77,15 @@ export default function BrushCursor({
 
   return (
     <svg
-      width={CANVAS_SIZE}
-      height={CANVAS_SIZE}
-      className="pointer-events-none absolute inset-0 z-[90]"
+      ref={ref}
+      width={1}
+      height={1}
+      overflow="visible"
+      className="pointer-events-none absolute left-0 top-0 z-[90]"
+      style={{ transform: cursorTransform(position) }}
       aria-hidden
     >
-      <g transform={`translate(${position.x} ${position.y}) rotate(${angle})`}>
+      <g transform={`rotate(${angle})`}>
         {/* Held at 45°, with the tip exactly on the pointer. */}
         <g transform="rotate(-45)" stroke={shadow} strokeWidth={0.75} strokeLinejoin="round">
           {erasing ? (

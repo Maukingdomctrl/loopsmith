@@ -67,6 +67,9 @@ export interface CompositeOptions {
   /** Interactive view (not export): while the view is changing, pencil
    *  layers may show a resampled stand-in and refine a moment later. */
   readonly interactive?: boolean;
+  /** Only this part of the surface is being redrawn (the caller has clipped
+   *  to it), so view aids need not be laid anywhere else. */
+  readonly region?: Rect | null;
 }
 
 export const DEFAULT_COMPOSITE: Omit<CompositeOptions, "background"> = {
@@ -83,20 +86,29 @@ export const CHECKER_LIGHT = "#2A2F3A";
 export const CHECKER_DARK = "#232833";
 
 /** Checkerboard is a VIEW aid. It is drawn beneath the layers and is excluded
- *  from every export path, so a transparent GIF is genuinely transparent. */
+ *  from every export path, so a transparent GIF is genuinely transparent.
+ *  `region` (surface pixels, which the caller has clipped to) limits it to the
+ *  squares that reach into that region; the pixels there are the same. */
 export function drawCheckerboard(
   ctx: Surface2D,
   size: number,
-  cell: number = CHECKER_SIZE
+  cell: number = CHECKER_SIZE,
+  region: Rect | null = null
 ): void {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = CHECKER_LIGHT;
   ctx.fillRect(0, 0, size, size);
   ctx.fillStyle = CHECKER_DARK;
-  for (let y = 0; y < size; y += cell) {
-    for (let x = ((y / cell) % 2) * cell; x < size; x += cell * 2) {
-      ctx.fillRect(x, y, cell, cell);
+  // dark squares are where the row and column have the same parity
+  const n = Math.ceil(size / cell);
+  const row0 = region ? Math.max(0, Math.floor(region.y / cell)) : 0;
+  const row1 = region ? Math.min(n, Math.ceil((region.y + region.h) / cell)) : n;
+  const col0 = region ? Math.max(0, Math.floor(region.x / cell)) : 0;
+  const col1 = region ? Math.min(n, Math.ceil((region.x + region.w) / cell)) : n;
+  for (let row = row0; row < row1; row++) {
+    for (let col = col0 + ((col0 ^ row) & 1); col < col1; col += 2) {
+      ctx.fillRect(col * cell, row * cell, cell, cell);
     }
   }
   ctx.restore();
@@ -145,7 +157,9 @@ export function compositeLayers(
   if (options.drawCheckerboard && background.checkerboard && background.transparent) {
     // squares keep their on-screen size at any surface density; whole pixels,
     // so neighbouring squares never blend at a fractional edge
-    drawCheckerboard(ctx, surface, Math.max(1, Math.round((CHECKER_SIZE * surface) / CANVAS_SIZE)));
+    drawCheckerboard(
+      ctx, surface, Math.max(1, Math.round((CHECKER_SIZE * surface) / CANVAS_SIZE)), options.region ?? null
+    );
   }
 
   // Opaque background is DOCUMENT state and is therefore exported.

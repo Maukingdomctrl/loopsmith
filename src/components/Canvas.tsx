@@ -64,7 +64,7 @@ import { baseLayer, findLayer } from "@/lib/layers/layerOps";
 import { defaultFitPose, layerMatrix, screenToCanvas } from "@/lib/layers/layerSpace";
 import { makePose } from "@/lib/geometry/pose";
 import type { TransparencyState } from "@/hooks/useTransparency";
-import BrushCursor from "./BrushCursor";
+import BrushCursor, { cursorTransform } from "./BrushCursor";
 import BrushPanel from "./BrushPanel";
 import ToolRail from "./ToolRail";
 import { DEFAULT_PAINT, onion, overlay, rangeFill } from "@/styles/tokens";
@@ -253,6 +253,10 @@ export default function Canvas({
   const onionCanvasRef = useRef<HTMLCanvasElement>(null);
   /** Scratch surface where each onion frame is drawn and tinted. */
   const onionScratch = useRef<HTMLCanvasElement | null>(null);
+  /** Where the tinted frames are composed before they are shown. */
+  const onionOut = useRef<OffscreenCanvas | null>(null);
+  /** Whether the onion canvas holds a bitmap. */
+  const onionShown = useRef(false);
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null);
 
   /** Local alias so existing coordinate helpers keep reading naturally. */
@@ -265,6 +269,15 @@ export default function Canvas({
   const [selectionActive, setSelectionActive] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [brushPos, setBrushPos] = useState<{ x: number; y: number } | null>(null);
+  /** The cursor's latest position and its element. React renders the cursor
+   *  when it appears; pointer moves then move the element in place, so the
+   *  editor does not re-render on every pen sample. */
+  const brushPosRef = useRef<{ x: number; y: number } | null>(null);
+  const brushCursorRef = useRef<SVGSVGElement | null>(null);
+  const attachBrushCursor = useCallback((el: SVGSVGElement | null) => {
+    brushCursorRef.current = el;
+    if (el && brushPosRef.current) el.style.transform = cursorTransform(brushPosRef.current);
+  }, []);
 
   const [selectionCanvas, setSelectionCanvas] =
     useState<HTMLCanvasElement | null>(null);
@@ -753,7 +766,7 @@ const commit = useCallback((next: Frame) => {
         ctx.beginPath();
         ctx.rect(area.x, area.y, area.w, area.h);
         ctx.clip();
-        drawFrameLayers(ctx, liveFrame, canvas.width, options);
+        drawFrameLayers(ctx, liveFrame, canvas.width, { ...options, region: area });
         ctx.restore();
         return;
       }
@@ -1490,14 +1503,28 @@ const commit = useCallback((next: Frame) => {
     const canvas = onionCanvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d", { alpha: true });
-    if (!ctx) return;
+    // The skins are composed offscreen and handed to the page as one bitmap.
+    // A 2D canvas on the page is copied to the compositor again on every
+    // frame anything changes (a full copy per frame in software compositing,
+    // even while it sits still); a bitmap is handed over once.
+    const shown = canvas.getContext("bitmaprenderer");
+    if (!shown) return;
 
     const size = canvas.width;
+    if (!onionSkin || !onionFrames.length) {
+      // Emptying it allocates a blank bitmap, so only when there is one to replace.
+      if (onionShown.current) shown.transferFromImageBitmap(null);
+      onionShown.current = false;
+      return;
+    }
+
+    const out = (onionOut.current ??= new OffscreenCanvas(size, size));
+    if (out.width !== size) out.width = size;
+    if (out.height !== size) out.height = size;
+    const ctx = out.getContext("2d", { alpha: true });
+    if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, size, size);
-
-    if (!onionSkin || !onionFrames.length) return;
 
     const scratch = (onionScratch.current ??= document.createElement("canvas"));
     scratch.width = size;
@@ -1531,6 +1558,8 @@ const commit = useCallback((next: Frame) => {
       ctx.drawImage(scratch, 0, 0);
     }
     ctx.globalAlpha = 1;
+    shown.transferFromImageBitmap(out.transferToImageBitmap());
+    onionShown.current = true;
   }, [onionSkin, onionFrames, decodeGeneration, stageRes]);
 
   /* ---------- Floating selection layer ---------- */
@@ -2311,24 +2340,28 @@ onPointerCancel={(e) => {
     handleCanvasPointerDown(e);
   }}
   onPointerMove={(e) => {
-    setBrushPos(
-      screenToCanvas(
-        { x: e.clientX, y: e.clientY },
-        canvasContainerRef.current?.getBoundingClientRect() ?? null,
-        view
-      )
+    const p = screenToCanvas(
+      { x: e.clientX, y: e.clientY },
+      canvasContainerRef.current?.getBoundingClientRect() ?? null,
+      view
     );
-    if (paintMove(e)) return;
-
-    if (lassoMode) {
-      drawLasso(e);
-      return;
+    brushPosRef.current = p;
+    if (!brushPos) setBrushPos(p);
+    if (!paintMove(e)) {
+      if (lassoMode) drawLasso(e);
+      else {
+        editor.onPointerMove(e);
+        handleCanvasPointerMove(e);
+      }
     }
-
-    editor.onPointerMove(e);
-    handleCanvasPointerMove(e);
+    // Moved last, after everything above has read the layout, so the write
+    // never forces a style recalc in the middle of the event.
+    if (brushCursorRef.current) brushCursorRef.current.style.transform = cursorTransform(p);
   }}
-  onPointerLeave={() => setBrushPos(null)}
+  onPointerLeave={() => {
+    brushPosRef.current = null;
+    setBrushPos(null);
+  }}
   onPointerUp={(e) => {
     if (paintUp(e)) return;
 
@@ -2420,6 +2453,7 @@ onPointerCancel={(e) => {
               straightenLine={editor.straightenLine}
             />
             <BrushCursor
+              ref={attachBrushCursor}
               position={brushPos}
               radius={
                 activeTool === "brush" ? brushNow.size : brushSize * widthFactor(tipPressure)
