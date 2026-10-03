@@ -32,7 +32,7 @@ import {
 import { MAT_IDENTITY, matApply, matInvert } from "@/lib/geometry/mat2d";
 import { RasterSurface, type SurfaceSnapshot } from "@/lib/raster/surface";
 import { MaterialStroke } from "@/lib/raster/brushes/materialStroke";
-import { brushSpec, defaultBrushPrefs } from "@/lib/raster/brushes/presets";
+import { brushSpec, defaultBrushPrefs, formatSize, sizeStep } from "@/lib/raster/brushes/presets";
 import type { BrushId, BrushPrefs } from "@/lib/raster/brushes/types";
 import { floodFill } from "@/lib/raster/floodFill";
 import { drawShape, geometryFromDrag } from "@/lib/raster/shapes";
@@ -160,8 +160,6 @@ function reportsPressure(e: Pick<PointerEvent, "pointerType" | "pressure">): boo
 const SIZE_SPAN = Math.log(PENCIL_MAX_SIZE / PENCIL_MIN_SIZE);
 const sizeToSlider = (s: number) => (1000 * Math.log(s / PENCIL_MIN_SIZE)) / SIZE_SPAN;
 const sliderToSize = (v: number) => PENCIL_MIN_SIZE * Math.exp((v / 1000) * SIZE_SPAN);
-const formatSize = (s: number) =>
-  s < 1 ? s.toFixed(2) : s < 10 ? s.toFixed(1) : s.toFixed(0);
 
 const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
@@ -2474,7 +2472,7 @@ onPointerCancel={(e) => {
               type="range"
               min={activeTool === "brush" ? brushSpecNow.minSize : 0}
               max={activeTool === "brush" ? brushSpecNow.maxSize : 1000}
-              step={activeTool === "brush" ? (brushSpecNow.maxSize <= 32 ? 0.5 : 1) : "any"}
+              step={activeTool === "brush" ? sizeStep(brushSpecNow) : "any"}
               value={activeTool === "brush" ? brushNow.size : sizeToSlider(brushSize)}
               onChange={(e) => {
                 const v = Number(e.target.value);
@@ -2489,7 +2487,7 @@ onPointerCancel={(e) => {
         style={rangeFill(activeTool === "brush" ? brushNow.size : sizeToSlider(brushSize), activeTool === "brush" ? brushSpecNow.minSize : 0, activeTool === "brush" ? brushSpecNow.maxSize : 1000)}
       />
             <span className="w-9 text-right font-mono">
-              {activeTool === "brush" ? brushNow.size : formatSize(brushSize)}
+              {formatSize(activeTool === "brush" ? brushNow.size : brushSize)}
             </span>
           </div>
         )}
