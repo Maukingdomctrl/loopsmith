@@ -665,7 +665,7 @@ const commit = useCallback((next: Frame) => {
           ),
         },
         CANVAS_SIZE,
-        { background, resolve, checkerboard: true }
+        { background, resolve, checkerboard: true, smoothing: true }
       );
       return;
     }
@@ -690,7 +690,7 @@ const commit = useCallback((next: Frame) => {
         ),
       },
       CANVAS_SIZE,
-      { background, resolve: domResolver(), checkerboard: true }
+      { background, resolve: domResolver(), checkerboard: true, smoothing: true }
     );
   }, [paintLayer, background, maskMode]);
 
@@ -1356,11 +1356,17 @@ const commit = useCallback((next: Frame) => {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
+  // Layer pixels are resampled smoothly, as the GIF export does: drawn
+  // nearest-neighbour, any layer that is zoomed, scaled or nudged by a
+  // fraction of a pixel turns its anti-aliased edges into uneven blocks.
+  // The lasso is the exception: it cuts pixels out of this canvas and writes
+  // them back at the layer's own size, so it keeps the unresampled ones.
   drawFrameLayers(ctx, frame, CANVAS_SIZE, {
     background,
     resolve: domResolver(),
     checkerboard: true,
     interactive: true,
+    smoothing: !lassoMode && !selectionActive,
   });
   }, [
       frame,
@@ -1373,6 +1379,8 @@ const commit = useCallback((next: Frame) => {
       view.y,
     view.rotation,
     decodeGeneration,
+    lassoMode,
+    selectionActive,
   ]);
 
   /* ---------- Onion skin (honours each neighbour's own transform) ---------- */
@@ -1408,6 +1416,7 @@ const commit = useCallback((next: Frame) => {
         background: ONION_BACKGROUND,
         resolve: domResolver(),
         checkerboard: false,
+        smoothing: true,
       });
 
       sctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2178,7 +2187,6 @@ onPointerCancel={(e) => {
   width={CANVAS_SIZE}
   height={CANVAS_SIZE}
   className="absolute inset-0 h-full w-full"
-  style={{ imageRendering: "pixelated" }}
   onPointerDown={(e) => {
     if (paintDown(e)) return;
 
@@ -2236,7 +2244,6 @@ onPointerCancel={(e) => {
                   width: selectionSize.w,
                   height: selectionSize.h,
                   zIndex: 20,
-                  imageRendering: "pixelated",
                 }}
               />
             )}
@@ -2264,7 +2271,6 @@ onPointerCancel={(e) => {
               width={CANVAS_SIZE}
               height={CANVAS_SIZE}
               className="pointer-events-none absolute inset-0 h-full w-full opacity-30"
-              style={{ imageRendering: "pixelated" }}
             />
 
             {points.length > 0 && (
