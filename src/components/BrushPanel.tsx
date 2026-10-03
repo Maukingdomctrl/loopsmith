@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
-import { BRUSHES } from "@/lib/raster/brushes/presets";
+import { BRUSHES, formatSize, sizeStep } from "@/lib/raster/brushes/presets";
 import {
   previewBackground,
   renderBrushPreview,
@@ -255,8 +255,8 @@ export default function BrushPanel({
           value={p.size}
           min={spec.minSize}
           max={spec.maxSize}
-          step={spec.maxSize <= 32 ? 0.5 : 1}
-          format={(v) => `${v}`}
+          step={sizeStep(spec)}
+          format={formatSize}
           onChange={(v) => onChange(spec.id, { size: v })}
         />
         <Slider

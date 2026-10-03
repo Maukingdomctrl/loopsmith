@@ -40,11 +40,6 @@ import {
 } from "./types";
 import { createModel } from "./models";
 
-/** Pen pressure is low-passed a little before it reaches the curve: a real
- *  digitizer reports quantized, slightly noisy values, and unfiltered they
- *  read as tiny width steps. 0.55 keeps the response instant to the eye. */
-const PRESSURE_SMOOTHING = 0.55;
-
 export class MaterialStroke {
   readonly options: MaterialStrokeOptions;
 
@@ -66,7 +61,6 @@ export class MaterialStroke {
 
   private ended = false;
   private startTime: number | null = null;
-  private smoothedPressure = -1;
 
   private prevDistance = -1;
   private prevTime = 0;
@@ -83,7 +77,7 @@ export class MaterialStroke {
     this.scale = options.scale && options.scale > 0 ? options.scale : 1;
     this.mouse = resolveMouse(options.brush, options.material);
 
-    this.path = new StrokePath(options.brush.smoothing);
+    this.path = new StrokePath(options.brush.smoothing, undefined, 1 / this.scale);
     // Pre-stroke pixels: the previous pigment / material state. Also what a
     // preview is recomposited from, so it is never a running approximation.
     this.baseline = surface.data.slice();
@@ -126,13 +120,9 @@ export class MaterialStroke {
       this.options.seed ?? hash2(Math.round(sample.x * 4), Math.round(sample.y * 4), 0x5eed)
     );
 
-    const raw = clamp01(sample.pressure);
-    this.smoothedPressure =
-      this.smoothedPressure < 0
-        ? raw
-        : this.smoothedPressure + (raw - this.smoothedPressure) * PRESSURE_SMOOTHING;
-
-    this.path.addSample({ ...sample, pressure: this.smoothedPressure });
+    // Pressure goes to the curve as reported: StrokePath smooths it between
+    // neighbouring samples without lag and interpolates it C¹ along the path.
+    this.path.addSample({ ...sample, pressure: clamp01(sample.pressure) });
     this.flush();
   }
 
@@ -145,7 +135,8 @@ export class MaterialStroke {
   /*  dabs                                                            */
   /* ---------------------------------------------------------------- */
 
-  private flush(): void {
+  /** `final`: the pen has lifted — also lay a dab at the exact end of the path. */
+  private flush(final = false): void {
     const model = this.model;
     if (!model) return;
     const inputs: BrushInput[] = [];
@@ -155,7 +146,7 @@ export class MaterialStroke {
       const input = this.makeInput(pt);
       inputs.push(input);
       return model.spacing(input);
-    });
+    }, final);
     for (const input of inputs) model.dab(input);
   }
 
@@ -330,7 +321,7 @@ export class MaterialStroke {
       Math.max(0, this.totalLength - Math.max(0, this.prevDistance))
     );
     this.finishing = true;
-    this.flush();
+    this.flush(true);
     this.model?.settle();
     this.ended = true;
 

@@ -72,3 +72,38 @@ export function discCoverageSuper(
   }
   return hit / (n * n);
 }
+
+/**
+ * Exact signed distance from (px, py) to a ROUND CONE: the convex hull of the
+ * discs (ax, ay, ra) and (bx, by, rb) — one span of a pressure-varying stroke.
+ * Negative inside. Exact everywhere (Quílez's closed form), so it can decide
+ * which pixels a span covers entirely, misses entirely, or crosses.
+ */
+export function sdRoundCone(
+  px: number, py: number,
+  ax: number, ay: number, ra: number,
+  bx: number, by: number, rb: number
+): number {
+  const bax = bx - ax, bay = by - ay;
+  const l2 = bax * bax + bay * bay;
+  const rr = ra - rb;
+  // one disc inside the other: the hull is the larger disc
+  if (l2 <= rr * rr) {
+    return ra >= rb
+      ? Math.hypot(px - ax, py - ay) - ra
+      : Math.hypot(px - bx, py - by) - rb;
+  }
+  const a2 = l2 - rr * rr;
+  const il2 = 1 / l2;
+  const pax = px - ax, pay = py - ay;
+  const y = pax * bax + pay * bay;
+  const z = y - l2;
+  const qx = pax * l2 - bax * y, qy = pay * l2 - bay * y;
+  const x2 = qx * qx + qy * qy;
+  const y2 = y * y * l2;
+  const z2 = z * z * l2;
+  const k = Math.sign(rr) * rr * rr * x2;
+  if (Math.sign(z) * a2 * z2 > k) return Math.sqrt(x2 + z2) * il2 - rb;
+  if (Math.sign(y) * a2 * y2 < k) return Math.sqrt(x2 + y2) * il2 - ra;
+  return (Math.sqrt(x2 * a2 * il2) + y * rr) * il2 - ra;
+}

@@ -70,7 +70,8 @@ export const BRUSHES: readonly BrushSpec[] = [
     model: "hard",
     shape: "round",
     defaultSize: 2,
-    minSize: 0.5,
+    // a 0.25 px line: the engine draws sub-pixel widths by exact coverage
+    minSize: 0.125,
     maxSize: 24,
     defaultIntensity: 1,
     intensityLabel: "Opacity",
@@ -147,6 +148,17 @@ export const BRUSHES: readonly BrushSpec[] = [
 ];
 
 export const BRUSH_IDS: readonly BrushId[] = BRUSHES.map((b) => b.id);
+
+/** Size slider step: fine enough to reach a brush's smallest size exactly. */
+export function sizeStep(spec: BrushSpec): number {
+  if (spec.minSize < 0.5) return spec.minSize;
+  return spec.maxSize <= 32 ? 0.5 : 1;
+}
+
+/** A size for a slider label: two decimals below 1, one below 10. */
+export function formatSize(s: number): string {
+  return s < 1 ? s.toFixed(2) : s < 10 ? s.toFixed(1) : s.toFixed(0);
+}
 
 export function brushSpec(id: BrushId): BrushSpec {
   return BRUSHES.find((b) => b.id === id) ?? BRUSHES[0];

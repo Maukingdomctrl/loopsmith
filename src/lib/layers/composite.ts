@@ -27,7 +27,7 @@ import { layerContentBox, layerMatrix } from "./layerSpace";
 import { resolveGroups } from "./groups";
 import type { Mat2D } from "@/types/geometry";
 import type { PencilStroke } from "@/lib/pencil/types";
-import { renderStrokes, strokesBounds } from "@/lib/pencil/render";
+import { LiveStrokeRender, renderStrokes, strokesBounds } from "@/lib/pencil/render";
 import { applyAdjustment, isIdentityAdjustment } from "./adjust";
 
 export type Surface2D =
@@ -139,7 +139,9 @@ export function compositeLayers(
   ctx.clearRect(0, 0, surface, surface);
 
   if (options.drawCheckerboard && background.checkerboard && background.transparent) {
-    drawCheckerboard(ctx, surface);
+    // squares keep their on-screen size at any surface density; whole pixels,
+    // so neighbouring squares never blend at a fractional edge
+    drawCheckerboard(ctx, surface, Math.max(1, Math.round((CHECKER_SIZE * surface) / CANVAS_SIZE)));
   }
 
   // Opaque background is DOCUMENT state and is therefore exported.
@@ -519,7 +521,8 @@ export function onStrokeRefine(cb: () => void): () => void {
   };
 }
 
-/** Strokes still being drawn: rendered, never cached. */
+/** Strokes still being drawn: rendered incrementally (`liveStrokeLayer`),
+ *  never cached. */
 const liveStrokes = new WeakSet<PencilStroke>();
 export const markLiveStroke = (s: PencilStroke) => liveStrokes.add(s);
 
@@ -559,6 +562,12 @@ function layerWithStrokes(
     if (isPrefix(e.strokes, strokes) && (!base || e.strokes.length > base.strokes.length)) base = e;
   }
 
+  // A stroke still being drawn is rendered incrementally, never cached.
+  const last = strokes[strokes.length - 1];
+  if (last && liveStrokes.has(last)) {
+    return liveStrokeLayer(key, strokes, base, bitmap, matrix, box, smoothing, surface);
+  }
+
   // The view is changing (zoom, move, rotate): stretch the last exact render
   // for now and render exactly once it settles. Rendering every intermediate
   // step of a zoom drag would stall it.
@@ -589,16 +598,54 @@ function layerWithStrokes(
 
   const iso = createSurface(surface);
   if (!iso) return null;
+  paintLayerStrokes(iso.ctx, base, bitmap, matrix, box, smoothing, surface, strokes);
+
+  lastExact.set(layer.id, { strokes, image: layer.image, matrix, surface, canvas: iso.canvas });
+  if (lastExact.size > STROKE_CACHE_MAX) lastExact.delete(lastExact.keys().next().value as string);
+  entries.push({ strokes, canvas: iso.canvas });
+  strokeCache.delete(key);
+  strokeCache.set(key, entries);
+  strokeCacheCount++;
+  // Keep the newest few per key and a bounded total.
+  if (entries.length > 3) {
+    entries.shift();
+    strokeCacheCount--;
+  }
+  while (strokeCacheCount > STROKE_CACHE_MAX) {
+    const oldestKey = strokeCache.keys().next().value as string;
+    const list = strokeCache.get(oldestKey)!;
+    list.shift();
+    strokeCacheCount--;
+    if (!list.length) strokeCache.delete(oldestKey);
+  }
+  return iso.canvas;
+}
+
+/**
+ * Paint a layer with its strokes onto a cleared surface: start from the
+ * longest cached render of its leading strokes (else its own pixels) and
+ * render the strokes that remain.
+ */
+function paintLayerStrokes(
+  ctx: Surface2D,
+  base: StrokeCacheEntry | null,
+  bitmap: LayerBitmap | null,
+  matrix: Mat2D,
+  box: Rect,
+  smoothing: boolean,
+  surface: number,
+  strokes: readonly PencilStroke[]
+): void {
   let todo: readonly PencilStroke[] = strokes;
   if (base) {
-    iso.ctx.drawImage(base.canvas as CanvasImageSource, 0, 0);
+    ctx.drawImage(base.canvas as CanvasImageSource, 0, 0);
     todo = strokes.slice(base.strokes.length);
   } else if (bitmap) {
-    iso.ctx.save();
-    iso.ctx.imageSmoothingEnabled = smoothing;
-    matSetTransform(iso.ctx as CanvasRenderingContext2D, matrix);
-    drawCropped(iso.ctx, bitmap, box);
-    iso.ctx.restore();
+    ctx.save();
+    ctx.imageSmoothingEnabled = smoothing;
+    matSetTransform(ctx as CanvasRenderingContext2D, matrix);
+    drawCropped(ctx, bitmap, box);
+    ctx.restore();
   }
 
   const b = strokesBounds(todo, matrix);
@@ -606,39 +653,67 @@ function layerWithStrokes(
     const x0 = Math.max(0, b.x0), y0 = Math.max(0, b.y0);
     const x1 = Math.min(surface, b.x1), y1 = Math.min(surface, b.y1);
     if (x1 > x0 && y1 > y0) {
-      const img = iso.ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+      const img = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
       renderStrokes(img, x0, y0, todo, {
         matrix,
         surfaceW: surface,
         surfaceH: surface,
         clip: box,
       });
-      iso.ctx.putImageData(img, x0, y0);
+      ctx.putImageData(img, x0, y0);
     }
   }
+}
 
-  const last = strokes[strokes.length - 1];
-  if (!last || !liveStrokes.has(last)) {
-    lastExact.set(layer.id, { strokes, image: layer.image, matrix, surface, canvas: iso.canvas });
-    if (lastExact.size > STROKE_CACHE_MAX) lastExact.delete(lastExact.keys().next().value as string);
-    entries.push({ strokes, canvas: iso.canvas });
-    strokeCache.delete(key);
-    strokeCache.set(key, entries);
-    strokeCacheCount++;
-    // Keep the newest few per key and a bounded total.
-    if (entries.length > 3) {
-      entries.shift();
-      strokeCacheCount--;
-    }
-    while (strokeCacheCount > STROKE_CACHE_MAX) {
-      const oldestKey = strokeCache.keys().next().value as string;
-      const list = strokeCache.get(oldestKey)!;
-      list.shift();
-      strokeCacheCount--;
-      if (!list.length) strokeCache.delete(oldestKey);
-    }
+/**
+ * The live stroke's layer. Set up once per stroke (and again if the view
+ * changes under it): the layer as it lies beneath the stroke is painted and
+ * snapshotted, then every frame only applies what the stroke changed — see
+ * `LiveStrokeRender`. A frame costs the same at the end of a long stroke as at
+ * the start.
+ */
+interface LiveLayer {
+  readonly key: string;
+  /** The strokes beneath the live one. */
+  readonly under: readonly PencilStroke[];
+  readonly ctx: Surface2D;
+  readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  readonly render: LiveStrokeRender;
+}
+
+const liveLayers = new WeakMap<PencilStroke, LiveLayer>();
+
+function liveStrokeLayer(
+  key: string,
+  strokes: readonly PencilStroke[],
+  base: StrokeCacheEntry | null,
+  bitmap: LayerBitmap | null,
+  matrix: Mat2D,
+  box: Rect,
+  smoothing: boolean,
+  surface: number
+): HTMLCanvasElement | OffscreenCanvas | null {
+  const live = strokes[strokes.length - 1];
+  let st = liveLayers.get(live);
+  if (!st || st.key !== key || st.under.length !== strokes.length - 1 || !isPrefix(st.under, strokes)) {
+    const iso = createSurface(surface);
+    if (!iso) return null;
+    const under = strokes.slice(0, -1);
+    paintLayerStrokes(iso.ctx, base, bitmap, matrix, box, smoothing, surface, under);
+    const beneath = iso.ctx.getImageData(0, 0, surface, surface).data;
+    st = {
+      key,
+      under,
+      ctx: iso.ctx,
+      canvas: iso.canvas,
+      render: new LiveStrokeRender(live, { matrix, surfaceW: surface, surfaceH: surface, clip: box }, beneath),
+    };
+    liveLayers.set(live, st);
   }
-  return iso.canvas;
+  for (const p of st.render.update()) {
+    st.ctx.putImageData(new ImageData(p.data, p.width, p.height), p.x, p.y);
+  }
+  return st.canvas;
 }
 
 /** Draw only the cropped sub-rect, positioned so local coordinates still line
