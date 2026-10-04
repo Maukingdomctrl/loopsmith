@@ -1450,22 +1450,32 @@ const commit = useCallback((next: Frame) => {
     // The skins are composed offscreen and handed to the page as one bitmap.
     // A 2D canvas on the page is copied to the compositor again on every
     // frame anything changes (a full copy per frame in software compositing,
-    // even while it sits still); a bitmap is handed over once.
-    const shown = canvas.getContext("bitmaprenderer");
-    if (!shown) return;
+    // even while it sits still); a bitmap is handed over once. Browsers
+    // without OffscreenCanvas (Safari before 16.4) compose on the page's
+    // canvas itself.
+    const offscreen = typeof OffscreenCanvas !== "undefined";
+    const shown = offscreen ? canvas.getContext("bitmaprenderer") : null;
+    const page = offscreen ? null : canvas.getContext("2d", { alpha: true });
+    if (!shown && !page) return;
 
     const size = canvas.width;
     if (!onionSkin || !onionFrames.length) {
       // Emptying it allocates a blank bitmap, so only when there is one to replace.
-      if (onionShown.current) shown.transferFromImageBitmap(null);
+      if (onionShown.current) {
+        shown?.transferFromImageBitmap(null);
+        page?.clearRect(0, 0, size, size);
+      }
       onionShown.current = false;
       return;
     }
 
-    const out = (onionOut.current ??= new OffscreenCanvas(size, size));
-    if (out.width !== size) out.width = size;
-    if (out.height !== size) out.height = size;
-    const ctx = out.getContext("2d", { alpha: true });
+    let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = page;
+    if (shown) {
+      const out = (onionOut.current ??= new OffscreenCanvas(size, size));
+      if (out.width !== size) out.width = size;
+      if (out.height !== size) out.height = size;
+      ctx = out.getContext("2d", { alpha: true });
+    }
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, size, size);
@@ -1502,7 +1512,7 @@ const commit = useCallback((next: Frame) => {
       ctx.drawImage(scratch, 0, 0);
     }
     ctx.globalAlpha = 1;
-    shown.transferFromImageBitmap(out.transferToImageBitmap());
+    if (shown && onionOut.current) shown.transferFromImageBitmap(onionOut.current.transferToImageBitmap());
     onionShown.current = true;
   }, [onionSkin, onionFrames, decodeGeneration, stageRes]);
 
