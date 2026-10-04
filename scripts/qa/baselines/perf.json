@@ -1,0 +1,290 @@
+{
+ "recorded": "2026-10-04T11:48:57.397Z",
+ "commit": "0a250034e037e03118e590eda54c12b3c9baefa9",
+ "env": {
+  "browser": "141.0.7390.37",
+  "platform": "linux",
+  "arch": "x64",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cores": 4,
+  "simd": "avx512",
+  "node": "v22.22.0"
+ },
+ "bench": {
+  "cpu hardLine await": {
+   "task": 319.6,
+   "during": 284.6,
+   "after": 31.3,
+   "wall": 3992.1,
+   "strokes": 5
+  },
+  "cpu hardLine hz": {
+   "task": 183.1,
+   "during": 153.4,
+   "after": 31.4,
+   "wall": 1013.4,
+   "strokes": 5
+  },
+  "cpu softRound await": {
+   "task": 309,
+   "during": 278.6,
+   "after": 36.7,
+   "wall": 3993.5,
+   "strokes": 5
+  },
+  "cpu softRound hz": {
+   "task": 183.6,
+   "during": 153.2,
+   "after": 30.4,
+   "wall": 1014.4,
+   "strokes": 5
+  },
+  "cpu softRect await": {
+   "task": 330.7,
+   "during": 296,
+   "after": 30.2,
+   "wall": 3993.3,
+   "strokes": 5
+  },
+  "cpu softRect hz": {
+   "task": 208.3,
+   "during": 175.6,
+   "after": 34.1,
+   "wall": 1015.7,
+   "strokes": 5
+  },
+  "cpu water await": {
+   "task": 463.2,
+   "during": 429.1,
+   "after": 33.4,
+   "wall": 4003.4,
+   "strokes": 5
+  },
+  "cpu water hz": {
+   "task": 318.2,
+   "during": 285,
+   "after": 33.2,
+   "wall": 1016.5,
+   "strokes": 5
+  },
+  "cpu texture await": {
+   "task": 337.5,
+   "during": 301.1,
+   "after": 34.3,
+   "wall": 3992.8,
+   "strokes": 5
+  },
+  "cpu texture hz": {
+   "task": 204.6,
+   "during": 174.1,
+   "after": 30.3,
+   "wall": 1014.4,
+   "strokes": 5
+  },
+  "cpu pencil await": {
+   "task": 333.6,
+   "during": 291.2,
+   "after": 44.5,
+   "wall": 3990.7,
+   "strokes": 5
+  },
+  "cpu pencil hz": {
+   "task": 195.4,
+   "during": 161.9,
+   "after": 37.5,
+   "wall": 1007.2,
+   "strokes": 5
+  },
+  "fallback hardLine hz": {
+   "task": 202,
+   "during": 169,
+   "after": 29.1,
+   "wall": 1011.8,
+   "strokes": 5
+  },
+  "fallback pencil hz": {
+   "task": 376.9,
+   "during": 345.1,
+   "after": 35.2,
+   "wall": 1020.7,
+   "strokes": 5
+  }
+ },
+ "latency": {
+  "cpu hardLine": {
+   "median": 13.7,
+   "p90": 21.8,
+   "toFrame": 10.5,
+   "toSwap": 3.4,
+   "threads": {
+    "page": 246.9,
+    "stageWorker": 157.3,
+    "rendererCompositor": 76.3,
+    "rasterWorkers": 59.2,
+    "displayCompositor": 177
+   }
+  },
+  "cpu pencil": {
+   "median": 16.9,
+   "p90": 24.9,
+   "toFrame": 12.1,
+   "toSwap": 5.9,
+   "threads": {
+    "page": 314.8,
+    "stageWorker": 298.1,
+    "rendererCompositor": 82.6,
+    "rasterWorkers": 75.8,
+    "displayCompositor": 350
+   }
+  },
+  "fallback hardLine": {
+   "median": 22.7,
+   "p90": 28.7,
+   "toFrame": 20.4,
+   "toSwap": 2.9,
+   "threads": {
+    "page": 254.9,
+    "stageWorker": 0,
+    "rendererCompositor": 75.2,
+    "rasterWorkers": 92.3,
+    "displayCompositor": 166.3
+   }
+  }
+ },
+ "stages": {
+  "cpu hardLine": {
+   "rows": [
+    {
+     "stage": "Input: Blink routing + hit-testing",
+     "ms": 56.5
+    },
+    {
+     "stage": "Input: React event dispatch (excl. the work below)",
+     "ms": 29.1
+    },
+    {
+     "stage": "Stroke model (path, resampling, dynamics)",
+     "ms": 5.3
+    },
+    {
+     "stage": "Rasterization (brush model)",
+     "ms": 15.4
+    },
+    {
+     "stage": "Dirty-region conversion (float recomposite + 8-bit)",
+     "ms": 8.8
+    },
+    {
+     "stage": "Stage hand-off (frame by key + postMessage)",
+     "ms": 22.7
+    },
+    {
+     "stage": "Canvas upload (putImageData + canvas hand-off)",
+     "ms": 0
+    },
+    {
+     "stage": "Compositing on the page (drawFrameLayers + raster flush)",
+     "ms": 0
+    },
+    {
+     "stage": "React re-render",
+     "ms": 0
+    },
+    {
+     "stage": "Page lifecycle (style, layout, prepaint, paint, layerize)",
+     "ms": 59
+    },
+    {
+     "stage": "Commit to the compositor thread",
+     "ms": 27.6
+    },
+    {
+     "stage": "Garbage collection",
+     "ms": 3.7
+    },
+    {
+     "stage": "Scheduler, frame overhead, other",
+     "ms": 72.6
+    }
+   ],
+   "mainThreadMs": 300.6,
+   "dominant": {
+    "stage": "Page lifecycle (style, layout, prepaint, paint, layerize)",
+    "ms": 59
+   },
+   "offMain": {
+    "stageWorker": 192,
+    "rendererCompositor": 48.1,
+    "rasterWorkers": 0,
+    "displayCompositor": 173.4
+   }
+  },
+  "cpu pencil": {
+   "rows": [
+    {
+     "stage": "Input: Blink routing + hit-testing",
+     "ms": 51.1
+    },
+    {
+     "stage": "Input: React event dispatch (excl. the work below)",
+     "ms": 43.5
+    },
+    {
+     "stage": "Stroke model (path, resampling, dynamics)",
+     "ms": 0
+    },
+    {
+     "stage": "Rasterization (brush model)",
+     "ms": 0
+    },
+    {
+     "stage": "Dirty-region conversion (float recomposite + 8-bit)",
+     "ms": 0
+    },
+    {
+     "stage": "Stage hand-off (frame by key + postMessage)",
+     "ms": 14.6
+    },
+    {
+     "stage": "Canvas upload (putImageData + canvas hand-off)",
+     "ms": 0
+    },
+    {
+     "stage": "Compositing on the page (drawFrameLayers + raster flush)",
+     "ms": 0
+    },
+    {
+     "stage": "React re-render",
+     "ms": 65.6
+    },
+    {
+     "stage": "Page lifecycle (style, layout, prepaint, paint, layerize)",
+     "ms": 78.9
+    },
+    {
+     "stage": "Commit to the compositor thread",
+     "ms": 20.5
+    },
+    {
+     "stage": "Garbage collection",
+     "ms": 3.2
+    },
+    {
+     "stage": "Scheduler, frame overhead, other",
+     "ms": 81.8
+    }
+   ],
+   "mainThreadMs": 359.3,
+   "dominant": {
+    "stage": "Page lifecycle (style, layout, prepaint, paint, layerize)",
+    "ms": 78.9
+   },
+   "offMain": {
+    "stageWorker": 313.7,
+    "rendererCompositor": 56.7,
+    "rasterWorkers": 0,
+    "displayCompositor": 379.7
+   }
+  }
+ }
+}

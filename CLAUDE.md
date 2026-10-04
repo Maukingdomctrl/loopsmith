@@ -6,6 +6,8 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 ## Commands
 - `npm run dev` — local app at http://localhost:3000
 - `npm run build` — must pass (type check included) before any change is done
+- `npm run qa` — brush-engine QA and performance pipeline for the change (skill `brush-qa`,
+  `scripts/qa/README.md`): pixel-exact regression, worker/page parity, timing and latency vs `origin/main`
 
 ## Working style (the owner prefers this)
 - Small, focused changes; one step at a time. Explain in plain words.

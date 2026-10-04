@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "brush:check": "node --experimental-strip-types --no-warnings --import ./scripts/brush-check/register.mjs scripts/brush-check/index.ts"
+    "brush:check": "node --experimental-strip-types --no-warnings --import ./scripts/brush-check/register.mjs scripts/brush-check/index.ts",
+    "qa": "node scripts/qa/qa.mjs",
+    "qa:full": "node scripts/qa/qa.mjs --tier full",
+    "qa:baselines": "node scripts/qa/qa.mjs --update-baselines"
   },
   "dependencies": {
     "gif.js.optimized": "^1.0.1",
@@ -23,6 +26,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "playwright-core": "1.56.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
