@@ -1,0 +1,415 @@
+{
+ "recorded": "2026-10-04T11:48:57.397Z",
+ "commit": "0a250034e037e03118e590eda54c12b3c9baefa9",
+ "env": {
+  "browser": "141.0.7390.37",
+  "platform": "linux",
+  "arch": "x64",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cores": 4,
+  "simd": "avx512",
+  "node": "v22.22.0"
+ },
+ "checks": [
+  {
+   "section": 1,
+   "key": "1. Coverage of straight lines vs the exact area (8 angles × 9 widths × 4 sub-pixel offsets) — worst pixel along the line (no staircase, no beads)",
+   "ok": true,
+   "label": "worst pixel along the line (no staircase, no beads)",
+   "value": 0.125,
+   "unit": "lv",
+   "lower": false,
+   "limit": 1.5
+  },
+  {
+   "section": 1,
+   "key": "1. Coverage of straight lines vs the exact area (8 angles × 9 widths × 4 sub-pixel offsets) — worst pixel at the round ends",
+   "ok": true,
+   "label": "worst pixel at the round ends",
+   "value": 2.317,
+   "unit": "lv",
+   "lower": false,
+   "limit": 3
+  },
+  {
+   "section": 1,
+   "key": "1. Coverage of straight lines vs the exact area (8 angles × 9 widths × 4 sub-pixel offsets) — total ink vs exact area",
+   "ok": true,
+   "label": "total ink vs exact area",
+   "value": 0.071,
+   "unit": "%",
+   "lower": false,
+   "limit": 0.5
+  },
+  {
+   "section": 2,
+   "key": "2. Coverage of curves (arcs of radius 2.5–20 px, lines 0.5–6 px wide) — worst pixel on a curve",
+   "ok": true,
+   "label": "worst pixel on a curve",
+   "value": 3.118,
+   "unit": "lv",
+   "lower": false,
+   "limit": 4
+  },
+  {
+   "section": 2,
+   "key": "2. Coverage of curves (arcs of radius 2.5–20 px, lines 0.5–6 px wide) — rms error on the tightest curve",
+   "ok": true,
+   "label": "rms error on the tightest curve",
+   "value": 1.114,
+   "unit": "lv",
+   "lower": false,
+   "limit": 2
+  },
+  {
+   "section": 2,
+   "key": "2. Coverage of curves (arcs of radius 2.5–20 px, lines 0.5–6 px wide) — worst pixel where the stroke's two ends touch",
+   "ok": true,
+   "label": "worst pixel where the stroke's two ends touch",
+   "value": 8.262,
+   "unit": "lv",
+   "lower": false,
+   "limit": 12
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 1× — columns with no ink (breaks)",
+   "ok": true,
+   "label": "columns with no ink (breaks)",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 1× — cross-section ripple after 8-bit commit (beads, dots)",
+   "ok": true,
+   "label": "cross-section ripple after 8-bit commit (beads, dots)",
+   "value": 0.718,
+   "unit": "%",
+   "lower": false,
+   "limit": 2
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 1× — darkest pixel of the 1 % line (it must not vanish)",
+   "ok": true,
+   "label": "darkest pixel of the 1 % line (it must not vanish)",
+   "value": 56,
+   "unit": "lv",
+   "lower": true,
+   "limit": 24
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 1× — more pressure always more ink (1 = yes)",
+   "ok": true,
+   "label": "more pressure always more ink (1 = yes)",
+   "value": 1,
+   "unit": "",
+   "lower": true,
+   "limit": 1
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 4× — columns with no ink (breaks)",
+   "ok": true,
+   "label": "columns with no ink (breaks)",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 4× — cross-section ripple after 8-bit commit (beads, dots)",
+   "ok": true,
+   "label": "cross-section ripple after 8-bit commit (beads, dots)",
+   "value": 0.947,
+   "unit": "%",
+   "lower": false,
+   "limit": 2
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 4× — darkest pixel of the 1 % line (it must not vanish)",
+   "ok": true,
+   "label": "darkest pixel of the 1 % line (it must not vanish)",
+   "value": 45,
+   "unit": "lv",
+   "lower": true,
+   "limit": 24
+  },
+  {
+   "section": 3,
+   "key": "3. Light touch: slow 30° lines, 1 % … 100 % pressure, layer zoom 4× — more pressure always more ink (1 = yes)",
+   "ok": true,
+   "label": "more pressure always more ink (1 = yes)",
+   "value": 1,
+   "unit": "",
+   "lower": true,
+   "limit": 1
+  },
+  {
+   "section": 4,
+   "key": "4. Sub-pixel position: lines moved in 1/8 px steps, ink centroid vs the exact one — centroid error",
+   "ok": true,
+   "label": "centroid error",
+   "value": 0,
+   "unit": "px",
+   "lower": false,
+   "limit": 0.01
+  },
+  {
+   "section": 4,
+   "key": "4. Sub-pixel position: lines moved in 1/8 px steps, ink centroid vs the exact one — ink error at any offset",
+   "ok": true,
+   "label": "ink error at any offset",
+   "value": 0.019,
+   "unit": "%",
+   "lower": false,
+   "limit": 0.5
+  },
+  {
+   "section": 5,
+   "key": "5. Pressure → width and opacity, 10 000 steps from 0 to 1 (pen, pencil, ink) — steps where width or opacity goes down",
+   "ok": true,
+   "label": "steps where width or opacity goes down",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 5,
+   "key": "5. Pressure → width and opacity, 10 000 steps from 0 to 1 (pen, pencil, ink) — steps where width does not grow (dead zones, quantization)",
+   "ok": true,
+   "label": "steps where width does not grow (dead zones, quantization)",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 5,
+   "key": "5. Pressure → width and opacity, 10 000 steps from 0 to 1 (pen, pencil, ink) — largest width step, × the average step",
+   "ok": true,
+   "label": "largest width step, × the average step",
+   "value": 1.721,
+   "unit": "",
+   "lower": false,
+   "limit": 2
+  },
+  {
+   "section": 5,
+   "key": "5. Pressure → width and opacity, 10 000 steps from 0 to 1 (pen, pencil, ink) — largest change of slope, × the average step (kinks)",
+   "ok": true,
+   "label": "largest change of slope, × the average step (kinks)",
+   "value": 0.047,
+   "unit": "",
+   "lower": false,
+   "limit": 0.1
+  },
+  {
+   "section": 6,
+   "key": "6. Pressure 2 % → 42 % along a line, one gesture reported at 500 Hz and at 60 Hz — difference between the two, % of the line's peak",
+   "ok": true,
+   "label": "difference between the two, % of the line's peak",
+   "value": 0.286,
+   "unit": "%",
+   "lower": false,
+   "limit": 1
+  },
+  {
+   "section": 6,
+   "key": "6. Pressure 2 % → 42 % along a line, one gesture reported at 500 Hz and at 60 Hz — breaks in the 60 Hz stroke",
+   "ok": true,
+   "label": "breaks in the 60 Hz stroke",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 7,
+   "key": "7. Path: an S-curve drawn slowly (0.3 px samples) and fast (18 px samples) — slow: centreline distance from the drawn curve",
+   "ok": true,
+   "label": "slow: centreline distance from the drawn curve",
+   "value": 0.039,
+   "unit": "px",
+   "lower": false,
+   "limit": 0.1
+  },
+  {
+   "section": 7,
+   "key": "7. Path: an S-curve drawn slowly (0.3 px samples) and fast (18 px samples) — fast: centreline distance from the drawn curve",
+   "ok": true,
+   "label": "fast: centreline distance from the drawn curve",
+   "value": 0.199,
+   "unit": "px",
+   "lower": false,
+   "limit": 0.35
+  },
+  {
+   "section": 8,
+   "key": "8. Hard edge: partial pixels only where the exact edge passes through them — farthest partial pixel from the edge (≤ half a pixel diagonal)",
+   "ok": true,
+   "label": "farthest partial pixel from the edge (≤ half a pixel diagonal)",
+   "value": 0.662,
+   "unit": "px",
+   "lower": false,
+   "limit": 0.708
+  },
+  {
+   "section": 9,
+   "key": "9. Stroke ends and taps at 2 %, 5 %, 30 % and 100 % pressure — worst pixel of a short line, ends included",
+   "ok": true,
+   "label": "worst pixel of a short line, ends included",
+   "value": 0.861,
+   "unit": "lv",
+   "lower": false,
+   "limit": 3
+  },
+  {
+   "section": 9,
+   "key": "9. Stroke ends and taps at 2 %, 5 %, 30 % and 100 % pressure — worst pixel of a tap",
+   "ok": true,
+   "label": "worst pixel of a tap",
+   "value": 1.113,
+   "unit": "lv",
+   "lower": false,
+   "limit": 3
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — softRound: breaks in slow + fast strokes",
+   "ok": true,
+   "label": "softRound: breaks in slow + fast strokes",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — softRound: 60 Hz vs 500 Hz ink difference",
+   "ok": true,
+   "label": "softRound: 60 Hz vs 500 Hz ink difference",
+   "value": 0.561,
+   "unit": "%",
+   "lower": false,
+   "limit": 5
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — softRect: breaks in slow + fast strokes",
+   "ok": true,
+   "label": "softRect: breaks in slow + fast strokes",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — softRect: 60 Hz vs 500 Hz ink difference",
+   "ok": true,
+   "label": "softRect: 60 Hz vs 500 Hz ink difference",
+   "value": 0.563,
+   "unit": "%",
+   "lower": false,
+   "limit": 5
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — water: breaks in slow + fast strokes",
+   "ok": true,
+   "label": "water: breaks in slow + fast strokes",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — water: 60 Hz vs 500 Hz ink difference",
+   "ok": true,
+   "label": "water: 60 Hz vs 500 Hz ink difference",
+   "value": 0.523,
+   "unit": "%",
+   "lower": false,
+   "limit": 5
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — texture: breaks in slow + fast strokes",
+   "ok": true,
+   "label": "texture: breaks in slow + fast strokes",
+   "value": 0,
+   "unit": "",
+   "lower": false,
+   "limit": 0
+  },
+  {
+   "section": 10,
+   "key": "10. Every brush through the shared pipeline: slow and fast strokes, pressure ramps — texture: 60 Hz vs 500 Hz ink difference",
+   "ok": true,
+   "label": "texture: 60 Hz vs 500 Hz ink difference",
+   "value": 1.288,
+   "unit": "%",
+   "lower": false,
+   "limit": 5
+  },
+  {
+   "section": 11,
+   "key": "11. Cost per pointer sample (curve + model + incremental preview), 240 Hz pen — size 2, 3 px per sample (median of 3)",
+   "ok": true,
+   "label": "size 2, 3 px per sample (median of 3)",
+   "value": 78.129,
+   "unit": "µs",
+   "lower": false,
+   "limit": 2000
+  },
+  {
+   "section": 11,
+   "key": "11. Cost per pointer sample (curve + model + incremental preview), 240 Hz pen — size 2, 10 px per sample (median of 3)",
+   "ok": true,
+   "label": "size 2, 10 px per sample (median of 3)",
+   "value": 199.665,
+   "unit": "µs",
+   "lower": false,
+   "limit": 2000
+  },
+  {
+   "section": 11,
+   "key": "11. Cost per pointer sample (curve + model + incremental preview), 240 Hz pen — size 12, 3 px per sample (median of 3)",
+   "ok": true,
+   "label": "size 12, 3 px per sample (median of 3)",
+   "value": 167.765,
+   "unit": "µs",
+   "lower": false,
+   "limit": 2000
+  },
+  {
+   "section": 11,
+   "key": "11. Cost per pointer sample (curve + model + incremental preview), 240 Hz pen — size 12, 10 px per sample (median of 3)",
+   "ok": true,
+   "label": "size 12, 10 px per sample (median of 3)",
+   "value": 647.521,
+   "unit": "µs",
+   "lower": false,
+   "limit": 2000
+  },
+  {
+   "section": 11,
+   "key": "11. Cost per pointer sample (curve + model + incremental preview), 240 Hz pen — size 24, 10 px per sample (median of 3)",
+   "ok": true,
+   "label": "size 24, 10 px per sample (median of 3)",
+   "value": 946.55,
+   "unit": "µs",
+   "lower": false,
+   "limit": 2000
+  }
+ ]
+}
