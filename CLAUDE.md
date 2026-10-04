@@ -57,3 +57,10 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 - **Per-frame cost while drawing is mostly the browser's**, not the brush engine's: never set React state on
   pointer moves (the brush cursor's element is moved in place), and never leave a still 2D canvas on the page
   (each frame copies every 2D canvas to the compositor; the onion skin is shown through a `bitmaprenderer`).
+- **The stage is drawn by a worker** (`lib/stage`): `Canvas.tsx` hands its canvas over on mount
+  (`StageClient`), then sends frames (`draw`) and stroke previews (`preview`, made on input, not at the next
+  frame, so the worker shows them a frame sooner). Images and strokes cross once and go by key after.
+  Pixels must match what the page drew: decoded images are drawn as the page's CPU raster would
+  (`stage/geometry.ts`: mip levels made on the page). One draw in flight at a time; while it is, only the
+  latest frame draw waits, and a preview is made when it can be sent.
+  The stage canvas has no width/height attributes (the worker sizes it); read it with `StageClient.pick`.
