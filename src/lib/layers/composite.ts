@@ -46,6 +46,10 @@ export interface LayerBitmap {
    *  compositor's own (a live preview matching how the committed image will
    *  be drawn). */
   readonly quality?: ImageSmoothingQuality;
+  /** Draws the rect `sx, sy, sw, sh` of the bitmap onto the same rect, in
+   *  place of a plain drawImage: the stage worker resamples its bitmaps the
+   *  way the browser resamples a decoded image (lib/stage/geometry.ts). */
+  readonly draw?: (ctx: Surface2D, sx: number, sy: number, sw: number, sh: number) => void;
 }
 
 export type BitmapResolver = (layer: Layer) => LayerBitmap | null;
@@ -369,7 +373,11 @@ export function layerMask(layer: Layer, resolve: BitmapResolver): CanvasImageSou
   const bmp = resolve({ ...layer, id: `${layer.id}#mask`, image: m.image });
   if (!bmp) return false;
 
-  const cacheable = typeof HTMLImageElement !== "undefined" && bmp.image instanceof HTMLImageElement;
+  // Decoded images only (an <img>, or the stage worker's bitmap of one); a
+  // live mask canvas changes under the same key.
+  const cacheable =
+    (typeof HTMLImageElement !== "undefined" && bmp.image instanceof HTMLImageElement) ||
+    (typeof ImageBitmap !== "undefined" && bmp.image instanceof ImageBitmap);
   const key = `${m.inverted ? 1 : 0}|${m.image}`;
   if (cacheable) {
     const hit = maskAlphaCache.get(key);
@@ -743,7 +751,8 @@ function drawCropped(ctx: Surface2D, bitmap: LayerBitmap, box: Rect): void {
   const sw = Math.max(0, Math.min(box.w, bitmap.width - sx));
   const sh = Math.max(0, Math.min(box.h, bitmap.height - sy));
   if (sw <= 0 || sh <= 0) return;
-  ctx.drawImage(bitmap.image, sx, sy, sw, sh, sx, sy, sw, sh);
+  if (bitmap.draw) bitmap.draw(ctx, sx, sy, sw, sh);
+  else ctx.drawImage(bitmap.image, sx, sy, sw, sh, sx, sy, sw, sh);
 }
 
 /** Composite into a fresh surface. Used by flatten, thumbnails and export. */

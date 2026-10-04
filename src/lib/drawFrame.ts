@@ -11,7 +11,7 @@ import type { Frame } from "@/types/frame";
 import type { Rect } from "@/types/geometry";
 import type { RenderTransform } from "@/lib/frameTransform";
 import { CANVAS_SIZE, fitScale, renderTransform } from "@/lib/frameTransform";
-import { compositeLayers, type BitmapResolver } from "@/lib/layers/composite";
+import { compositeLayers, type BitmapResolver, type Surface2D } from "@/lib/layers/composite";
 import { domResolver } from "@/lib/layers/flatten";
 import { DEFAULT_BACKGROUND, type CanvasBackground } from "@/types/layer";
 
@@ -55,8 +55,8 @@ export function drawFrameComposed(
 
 /** The layer-aware path. Preferred by Canvas and by export. */
 export function drawFrameLayers(
-  ctx: CanvasRenderingContext2D,
-  frame: Frame,
+  ctx: Surface2D,
+  frame: Pick<Frame, "layers" | "crop">,
   surface: number = CANVAS_SIZE,
     opts: {
     background?: CanvasBackground;

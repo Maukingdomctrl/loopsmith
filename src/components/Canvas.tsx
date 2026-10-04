@@ -29,7 +29,7 @@ import {
   clearTransforms,
   baseLayerMatrix,
 } from "@/lib/frameTransform";
-import { MAT_IDENTITY, matApply, matChain, matInvert, matScale } from "@/lib/geometry/mat2d";
+import { MAT_IDENTITY, matApply, matInvert } from "@/lib/geometry/mat2d";
 import { RasterSurface, type SurfaceSnapshot } from "@/lib/raster/surface";
 import { MaterialStroke } from "@/lib/raster/brushes/materialStroke";
 import { brushSpec, defaultBrushPrefs, formatSize, sizeStep } from "@/lib/raster/brushes/presets";
@@ -48,10 +48,8 @@ import {
 } from "@/lib/pencil/types";
 import { renderStrokes, widthFactor } from "@/lib/pencil/render";
 import { bakeLayerStrokes } from "@/lib/pencil/bake";
-import { markLiveStroke, onStrokeRefine, type BitmapResolver } from "@/lib/layers/composite";
 import type { FloodFillSettings, RGBA, ShapeKind } from "@/types/raster";
 import type { Frame } from "@/types/frame";
-import type { Mat2D, Rect } from "@/types/geometry";
 import type { CanvasBackground, Layer, LayerSelection } from "@/types/layer";
 import { DEFAULT_BACKGROUND, isLockedIn } from "@/types/layer";
 import type { UseLayerEditorReturn } from "@/hooks/useLayerEditor";
@@ -63,6 +61,8 @@ import {
 import { baseLayer, findLayer } from "@/lib/layers/layerOps";
 import { defaultFitPose, layerMatrix, screenToCanvas } from "@/lib/layers/layerSpace";
 import { makePose } from "@/lib/geometry/pose";
+import { StageClient, type StageDrawInput } from "@/lib/stage/client";
+import { stageArea, stageDensity, stageMatrix } from "@/lib/stage/geometry";
 import type { TransparencyState } from "@/hooks/useTransparency";
 import BrushCursor, { cursorTransform } from "./BrushCursor";
 import BrushPanel from "./BrushPanel";
@@ -157,38 +157,6 @@ function reportsPressure(e: Pick<PointerEvent, "pointerType" | "pressure">): boo
   return (
     e.pointerType === "touch" && e.pressure > 0 && e.pressure < 1 && e.pressure !== 0.5
   );
-}
-
-/** Layer pixels → stage pixels: the matrix the compositor draws the layer with. */
-function stageMatrix(layer: Layer, size: number): Mat2D {
-  const k = size / CANVAS_SIZE;
-  return matChain(matScale(k, k), layerMatrix(layer));
-}
-
-/** Stage pixels per layer pixel. */
-const stageDensity = (m: Mat2D) => Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
-
-/**
- * The stage pixels a rect of a layer's pixels can change, at stage size
- * `size`: the rect mapped through the matrix the compositor draws the layer
- * with, widened by the reach of its resampling filter (about a layer pixel
- * when the layer is enlarged, more when it is shrunk) and rounded out.
- */
-function stageArea(layer: Layer, r: Rect, size: number): Rect | null {
-  const m = stageMatrix(layer, size);
-  const pad = 2 + Math.ceil(2 / Math.max(stageDensity(m), 1e-3));
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const [x, y] of [
-    [r.x - pad, r.y - pad], [r.x + r.w + pad, r.y - pad],
-    [r.x - pad, r.y + r.h + pad], [r.x + r.w + pad, r.y + r.h + pad],
-  ]) {
-    const q = matApply(m, { x, y });
-    x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y);
-    x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y);
-  }
-  const ax = Math.max(0, Math.floor(x0) - 2), ay = Math.max(0, Math.floor(y0) - 2);
-  const bx = Math.min(size, Math.ceil(x1) + 2), by = Math.min(size, Math.ceil(y1) + 2);
-  return bx > ax && by > ay ? { x: ax, y: ay, w: bx - ax, h: by - ay } : null;
 }
 
 /** Size slider: continuous and logarithmic, so small sizes get most of the
@@ -528,7 +496,6 @@ const commit = useCallback((next: Frame) => {
   const liveRef = useRef<{ stroke: PencilStroke & { pts: number[] }; t0: number } | null>(null);
   /** The material brush stroke being drawn on the pixel surface. */
   const strokeRef = useRef<MaterialStroke | null>(null);
-  const scratchRef = useRef<HTMLCanvasElement | null>(null);
   /** A committed bitmap still decoding; the surface already holds it. */
   const pendingImageRef = useRef<string | null>(null);
   /** Which layer `surfaceRef` holds pixels for. */
@@ -538,8 +505,15 @@ const commit = useCallback((next: Frame) => {
    *  preview knows the stage no longer holds what it drew. */
   const stageGenRef = useRef(0);
   /** What the brush preview last drew in full: its stroke, on which stage
-   *  generation, at which size. Later frames only redraw what the stroke changed. */
-  const brushShownRef = useRef<{ stroke: MaterialStroke; gen: number; size: number } | null>(null);
+   *  generation, at which size, from a surface of which size. Later frames
+   *  only redraw what the stroke changed. */
+  const brushShownRef = useRef<
+    { stroke: MaterialStroke; gen: number; size: number; w: number; h: number } | null
+  >(null);
+  /** The stage canvas, drawn by the stage worker (lib/stage). */
+  const stageRef = useRef<StageClient | null>(null);
+  /** The stage's backing size as last rendered: what a preview draws at. */
+  const stageResRef = useRef(stageRes);
 
   // Tools need a sheet: an empty layer becomes a 512×512 page. Fill needs
   // pixels: pencil strokes are folded into the bitmap and a surface is kept ready.
@@ -684,17 +658,15 @@ const commit = useCallback((next: Frame) => {
   /**
    * Live preview while a stroke is in progress: the normal composite, with the
    * live stroke appended to the layer being painted. Earlier strokes come from the
-   * compositor's cache, so only the live stroke is rendered each frame.
+   * compositor's cache, so only the live stroke is rendered each draw. Returns
+   * the stage draw (null: nothing to show).
    */
-  const paintPreview = useCallback(() => {
-    previewRaf.current = 0;
-    const canvas = baseCanvasRef.current;
+  const previewDraw = useCallback((): StageDrawInput | null => {
     const live = liveRef.current;
     const stroke = strokeRef.current;
     const shaping = !!shapeRef.current;
-    if (!canvas || !paintLayer || (!live && !stroke && !shaping)) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!paintLayer || (!live && !stroke && !shaping)) return null;
+    const size = stageResRef.current;
 
     const f = editRef.current;
 
@@ -703,115 +675,88 @@ const commit = useCallback((next: Frame) => {
     // stack, with its blend, opacity and mask.
     if (stroke || shaping || (live && maskMode)) {
       const surface = surfaceRef.current;
-      if (!surface) return;
+      if (!surface) return null;
       const changed = stroke ? stroke.previewInto() : null;
-      let scratch = scratchRef.current;
-      if (!scratch) {
-        scratch = document.createElement("canvas");
-        scratchRef.current = scratch;
-      }
-      const sized = scratch.width === surface.width && scratch.height === surface.height;
-      if (scratch.width !== surface.width) scratch.width = surface.width;
-      if (scratch.height !== surface.height) scratch.height = surface.height;
-      const sctx = scratch.getContext("2d");
-      if (!sctx) return;
-
-      const dom = domResolver();
-      // A mask preview answers for the mask; a pixel preview for the layer.
-      const liveId = maskMode ? `${paintLayer.id}#mask` : paintLayer.id;
       // The committed layer is drawn from a decoded image, which the browser
       // resamples like a canvas at "low" whenever it is shown at half size or
       // more (its "high" only takes effect when shrinking further). The live
       // canvas is drawn the same way, so nothing changes when the pen lifts.
       const painted = findLayer(f.layers, paintLayer.id);
       const quality: ImageSmoothingQuality =
-        painted && stageDensity(stageMatrix(painted, canvas.width)) >= 0.5 ? "low" : "high";
-      const resolve: BitmapResolver = (l) =>
-        l.id === liveId
-          ? { layerId: liveId, image: scratch!, width: scratch!.width, height: scratch!.height, quality }
-          : dom(l);
-      const liveFrame: Frame = {
-        ...f,
-        // Any non-null image makes the (maybe blank) layer or mask render;
-        // the resolver hands back the live surface for it.
-        layers: f.layers.map((l) =>
-          l.id !== paintLayer.id
-            ? l
-            : maskMode && l.mask
-              ? { ...l, mask: { ...l.mask, image: "live" } }
-              : { ...l, image: "live" }
-        ),
-      };
-      const options = { background, resolve, checkerboard: true, smoothing: true };
+        painted && stageDensity(stageMatrix(painted, size)) >= 0.5 ? "low" : "high";
+      const { width, height } = surface;
+      const target = { kind: "raster" as const, layerId: paintLayer.id, mask: maskMode, quality, width, height };
 
-      // A brush stroke changes a few pixels a frame. Once its first frame is on
-      // the stage, later frames convert and upload only those pixels and
+      // A brush stroke changes a few pixels at a time. Once its first draw is
+      // on the stage, later draws convert and send only those pixels and
       // recomposite only the stage pixels they land on. Anything else that
       // redraws the stage (a commit, a decode) bumps the generation, and the
-      // next frame starts over in full.
+      // next draw starts over in full.
       const shown = brushShownRef.current;
       const continuing =
-        !!stroke && !shaping && !live && sized &&
-        shown?.stroke === stroke && shown.gen === stageGenRef.current && shown.size === canvas.width;
+        !!stroke && !shaping && !live &&
+        shown?.stroke === stroke && shown.gen === stageGenRef.current && shown.size === size &&
+        shown.w === width && shown.h === height;
       if (continuing) {
-        if (!changed) return;
+        if (!changed) return null;
         const part = surface.toImageData(changed);
-        if (part.width > 0 && part.height > 0) {
-          sctx.putImageData(new ImageData(part.data, part.width, part.height), changed.x, changed.y);
-        }
-        const area = painted ? stageArea(painted, changed, canvas.width) : null;
-        if (!area) return;
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.beginPath();
-        ctx.rect(area.x, area.y, area.w, area.h);
-        ctx.clip();
-        drawFrameLayers(ctx, liveFrame, canvas.width, { ...options, region: area });
-        ctx.restore();
-        return;
+        return {
+          size,
+          frame: f,
+          background,
+          live: {
+            ...target,
+            rect: { x: changed.x, y: changed.y, w: part.width, h: part.height },
+            pixels: part.data,
+            full: false,
+            area: painted ? stageArea(painted, changed, size) : null,
+          },
+        };
       }
 
       const { data } = surface.toImageData();
-      const img = new ImageData(data, surface.width, surface.height);
-      if (live) renderMaskStroke(img, live.stroke);
-      sctx.putImageData(img, 0, 0);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawFrameLayers(ctx, liveFrame, canvas.width, options);
+      if (live) renderMaskStroke({ data, width, height }, live.stroke);
       brushShownRef.current =
-        stroke && !shaping && !live ? { stroke, gen: stageGenRef.current, size: canvas.width } : null;
-      return;
+        stroke && !shaping && !live ? { stroke, gen: stageGenRef.current, size, w: width, h: height } : null;
+      return {
+        size,
+        frame: f,
+        background,
+        live: { ...target, rect: { x: 0, y: 0, w: width, h: height }, pixels: data, full: true, area: null },
+      };
     }
-    if (!live) return;
+    if (!live) return null;
+    return { size, frame: f, background, live: { kind: "pencil", layerId: paintLayer.id, stroke: live.stroke } };
+  }, [paintLayer, background, maskMode]);
+
+  /** Once a frame: the stage's own preview when it is drawn here, and the
+   *  cursor tip. */
+  const paintPreview = useCallback(() => {
+    previewRaf.current = 0;
+    const stage = stageRef.current;
+    if (stage && !stage.offThread) stage.preview(previewDraw);
 
     // Cursor tip follows pressure, at most once a frame and in small steps,
     // so the whole editor does not re-render on every pen sample.
-    const pts = live.stroke.pts;
-    if (pts.length >= 7) {
-      const q = Math.round(pts[pts.length - 5] * 20) / 20;
-      setTipPressure((cur) => (cur === q ? cur : q));
+    const live = liveRef.current;
+    if (live && !maskMode && !strokeRef.current && !shapeRef.current) {
+      const pts = live.stroke.pts;
+      if (pts.length >= 7) {
+        const q = Math.round(pts[pts.length - 5] * 20) / 20;
+        setTipPressure((cur) => (cur === q ? cur : q));
+      }
     }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawFrameLayers(
-      ctx,
-      {
-        ...f,
-        layers: f.layers.map((l) =>
-          l.id === paintLayer.id ? { ...l, strokes: [...(l.strokes ?? []), live.stroke] } : l
-        ),
-      },
-      canvas.width,
-      { background, resolve: domResolver(), checkerboard: true, smoothing: true }
-    );
-  }, [paintLayer, background, maskMode]);
+  }, [previewDraw, maskMode]);
 
   const schedulePreview = useCallback(() => {
+    // The stage worker takes the stroke at once rather than at our next
+    // frame, so it can show it in the frame being made (a frame sooner).
+    const stage = stageRef.current;
+    if (stage?.offThread) stage.preview(previewDraw);
     if (!previewRaf.current) {
       previewRaf.current = requestAnimationFrame(paintPreview);
     }
-  }, [paintPreview]);
+  }, [paintPreview, previewDraw]);
 
   useEffect(
     () => () => {
@@ -937,21 +882,19 @@ const commit = useCallback((next: Frame) => {
     const p = screenToCanvas({ x: e.clientX, y: e.clientY }, rect, view);
 
     if (activeTool === "picker") {
-      const stage = baseCanvasRef.current;
-      const ctx = stage?.getContext("2d");
-      if (stage && ctx) {
-        const k = stage.width / CANVAS_SIZE;
-        const d = ctx.getImageData(
-          Math.max(0, Math.min(stage.width - 1, Math.floor(p.x * k))),
-          Math.max(0, Math.min(stage.height - 1, Math.floor(p.y * k))),
-          1,
-          1
-        ).data;
-        if (d[3] > 0) {
-          setPaintColor(toHex({ r: d[0] / 255, g: d[1] / 255, b: d[2] / 255, a: 1 }));
-          setPaintTool("pencil");
-        }
-      }
+      const size = stageResRef.current;
+      const k = size / CANVAS_SIZE;
+      stageRef.current
+        ?.pick(
+          Math.max(0, Math.min(size - 1, Math.floor(p.x * k))),
+          Math.max(0, Math.min(size - 1, Math.floor(p.y * k)))
+        )
+        .then((d) => {
+          if (d && d[3] > 0) {
+            setPaintColor(toHex({ r: d[0] / 255, g: d[1] / 255, b: d[2] / 255, a: 1 }));
+            setPaintTool("pencil");
+          }
+        });
       return true;
     }
 
@@ -1030,7 +973,6 @@ const commit = useCallback((next: Frame) => {
       ...(lockAlpha && { lockAlpha: true }),
       pts: [],
     };
-    markLiveStroke(stroke);
     const t0 = e.timeStamp;
     const first = pencilSample(e.nativeEvent, t0);
     if (first) {
@@ -1446,10 +1388,6 @@ const commit = useCallback((next: Frame) => {
     };
   }, [editFrame.layers, editor, isPlaying]);
 
-  // A pencil layer shown as a stand-in during a view change has been rendered
-  // exactly: repaint.
-  useEffect(() => onStrokeRefine(() => setDecodeGeneration((g) => g + 1)), []);
-
   /* ---------- Base layer (full composite) ---------- */
 
   /**
@@ -1459,29 +1397,35 @@ const commit = useCallback((next: Frame) => {
    * size, so what the animator sees is what the export contains. The previous
    * architecture had four independent draw paths reading `frame.x/y` directly,
    * which meant a second layer required four correct edits instead of one.
+   *
+   * The stage canvas is handed to the stage worker on mount, which draws it
+   * from then on (lib/stage): drawing it here would cost the main thread the
+   * composite and the browser's copy of the canvas on every frame.
    */
+  useLayoutEffect(() => {
+    const canvas = baseCanvasRef.current;
+    if (!canvas) return;
+    const stage = StageClient.attach(canvas);
+    stageRef.current = stage;
+    return () => {
+      stageRef.current = null;
+      stage.release();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    stageResRef.current = stageRes;
+  }, [stageRes]);
+
    useEffect(() => {
-  const canvas = baseCanvasRef.current;
-  if (!canvas) return;
-
-  const ctx = canvas.getContext("2d", { alpha: true });
-  if (!ctx) return;
-
-  // Always repaint from a clean surface.
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const stage = stageRef.current;
+  if (!stage) return;
 
   // Drawn at the screen's pixel density (stageRes), and layer pixels are
   // resampled smoothly, as the GIF export does: drawn nearest-neighbour, any
   // layer that is zoomed, scaled or nudged by a fraction of a pixel turns its
   // anti-aliased edges into uneven blocks.
-  drawFrameLayers(ctx, frame, canvas.width, {
-    background,
-    resolve: domResolver(),
-    checkerboard: true,
-    interactive: true,
-    smoothing: true,
-  });
+  stage.draw({ size: stageRes, frame, background, interactive: true });
   stageGenRef.current++;
   }, [
       frame,
@@ -1506,22 +1450,32 @@ const commit = useCallback((next: Frame) => {
     // The skins are composed offscreen and handed to the page as one bitmap.
     // A 2D canvas on the page is copied to the compositor again on every
     // frame anything changes (a full copy per frame in software compositing,
-    // even while it sits still); a bitmap is handed over once.
-    const shown = canvas.getContext("bitmaprenderer");
-    if (!shown) return;
+    // even while it sits still); a bitmap is handed over once. Browsers
+    // without OffscreenCanvas (Safari before 16.4) compose on the page's
+    // canvas itself.
+    const offscreen = typeof OffscreenCanvas !== "undefined";
+    const shown = offscreen ? canvas.getContext("bitmaprenderer") : null;
+    const page = offscreen ? null : canvas.getContext("2d", { alpha: true });
+    if (!shown && !page) return;
 
     const size = canvas.width;
     if (!onionSkin || !onionFrames.length) {
       // Emptying it allocates a blank bitmap, so only when there is one to replace.
-      if (onionShown.current) shown.transferFromImageBitmap(null);
+      if (onionShown.current) {
+        shown?.transferFromImageBitmap(null);
+        page?.clearRect(0, 0, size, size);
+      }
       onionShown.current = false;
       return;
     }
 
-    const out = (onionOut.current ??= new OffscreenCanvas(size, size));
-    if (out.width !== size) out.width = size;
-    if (out.height !== size) out.height = size;
-    const ctx = out.getContext("2d", { alpha: true });
+    let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = page;
+    if (shown) {
+      const out = (onionOut.current ??= new OffscreenCanvas(size, size));
+      if (out.width !== size) out.width = size;
+      if (out.height !== size) out.height = size;
+      ctx = out.getContext("2d", { alpha: true });
+    }
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, size, size);
@@ -1558,7 +1512,7 @@ const commit = useCallback((next: Frame) => {
       ctx.drawImage(scratch, 0, 0);
     }
     ctx.globalAlpha = 1;
-    shown.transferFromImageBitmap(out.transferToImageBitmap());
+    if (shown && onionOut.current) shown.transferFromImageBitmap(onionOut.current.transferToImageBitmap());
     onionShown.current = true;
   }, [onionSkin, onionFrames, decodeGeneration, stageRes]);
 
@@ -2325,8 +2279,6 @@ onPointerCancel={(e) => {
             
             <canvas
   ref={baseCanvasRef}
-  width={stageRes}
-  height={stageRes}
   className="absolute inset-0 h-full w-full"
   onPointerDown={(e) => {
     if (paintDown(e)) return;
