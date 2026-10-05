@@ -31,7 +31,7 @@ export const RULES = [
   { test: /^scripts\/brush-check\//, tier: "fast", why: "brush precision checks" },
   { test: /^src\/lib\/stage\/|^src\/components\/Canvas\.tsx$/, tier: "perf", plan: "full", paths: ALL_PATHS, dev: true, why: "stage worker / canvas" },
   { test: /^src\/lib\/(layers\/(composite|adjust|groups|flatten|layerSpace)|drawFrame|frameTransform)\.ts$|^src\/lib\/geometry\//, tier: "perf", plan: "full", paths: ALL_PATHS, why: "compositor" },
-  { test: /^src\/lib\/(raster|pencil)\//, tier: "perf", plan: "full", paths: ["cpu", "gpu", "fallback"], why: "brush engine" },
+  { test: /^src\/lib\/(raster|pencil|input)\//, tier: "perf", plan: "full", paths: ["cpu", "gpu", "fallback"], why: "brush engine (input, dynamics, materials)" },
   { test: /^(package(-lock)?\.json|next\.config\.\w+|tsconfig\.json|postcss\.config\.\w+)$/, tier: "perf", plan: "full", paths: ALL_PATHS, dev: true, why: "dependencies / build config" },
   { test: /^src\/app\/page\.tsx$|^src\/components\/BrushCursor\.tsx$|^src\/hooks\/useLayerEditor\.ts$|^src\/lib\/(history|frameOps)\.ts$|^src\/lib\/layers\//, tier: "perf", plan: "light", paths: ["cpu"], why: "pointer path / document state" },
   { test: /^src\//, tier: "pixels", paths: ["cpu"], why: "app code / UI" },

@@ -13,7 +13,9 @@
  *
  * The SVG is anchored at the tip and placed with a CSS translate, so the
  * canvas can move it on every pointer sample by writing `cursorTransform`
- * to the element (see Canvas) instead of re-rendering the editor.
+ * to the element (see Canvas) instead of re-rendering the editor. The same
+ * goes for the pencil's tip following pen pressure: `sizeCursorTip` rewrites
+ * the few attributes that depend on the radius, in place.
  */
 
 import { useMemo, type Ref } from "react";
@@ -23,6 +25,58 @@ import type { BrushCursorShape } from "@/types/raster";
 
 /** The CSS transform that puts the cursor's tip at a canvas-space point. */
 export const cursorTransform = (p: Vec2): string => `translate(${p.x}px, ${p.y}px)`;
+
+/**
+ * The pencil's size-dependent parts. The tool grows with the tip: the lead
+ * ends in a rounded tip exactly as wide as the mark it leaves, and the pencil
+ * scales with it (up to 4×) so it still looks like a pencil in the hand.
+ */
+function pencilArt(r: number) {
+  const s = Math.min(4, Math.max(1, r));
+  return {
+    lead: `scale(${s})`,
+    leadStroke: 0.75 / s,
+    tip: `M ${4 * s} ${-1.3 * s} L 0 ${-r} A ${r} ${r} 0 0 0 0 ${r} L ${4 * s} ${1.3 * s} Z`,
+  };
+}
+
+/** The rubber's size-dependent parts: its rubbing end is as wide as the eraser. */
+function rubberArt(r: number) {
+  const h = Math.max(5, r);
+  const k = Math.min(3, Math.max(1, r / 5));
+  return { y: -h, height: 2 * h, end: 12 * k, endRound: 2 * k, sleeve: 16 * k, sleeveRound: k };
+}
+
+/**
+ * Resize a rendered pencil or rubber cursor to `radius` (canvas px) in place —
+ * for following pen pressure without re-rendering the editor every frame.
+ */
+export function sizeCursorTip(svg: SVGSVGElement | null, radius: number): void {
+  if (!svg) return;
+  const r = Math.max(0.5, radius);
+  const tip = svg.querySelector<SVGPathElement>("[data-tip]");
+  const lead = svg.querySelector<SVGGElement>("[data-lead]");
+  if (tip && lead) {
+    const art = pencilArt(r);
+    lead.setAttribute("transform", art.lead);
+    lead.setAttribute("stroke-width", String(art.leadStroke));
+    tip.setAttribute("d", art.tip);
+  }
+  const end = svg.querySelector<SVGRectElement>("[data-rubber]");
+  const sleeve = svg.querySelector<SVGRectElement>("[data-sleeve]");
+  if (end && sleeve) {
+    const a = rubberArt(r);
+    for (const el of [end, sleeve]) {
+      el.setAttribute("y", String(a.y));
+      el.setAttribute("height", String(a.height));
+    }
+    end.setAttribute("width", String(a.end));
+    end.setAttribute("rx", String(a.endRound));
+    sleeve.setAttribute("x", String(a.end));
+    sleeve.setAttribute("width", String(a.sleeve));
+    sleeve.setAttribute("rx", String(a.sleeveRound));
+  }
+}
 
 interface Props {
   /** The cursor's element, for moving it without a render. */
@@ -66,14 +120,9 @@ export default function BrushCursor({
   const { rx, ry } = geometry;
   const shadow = cursorArt.outline;
 
-  // The tool grows with the tip. The pencil lead ends in a rounded-ctrl tip exactly
-  // as wide as the mark it leaves, and the pencil scales with it (up to 4×) so
-  // it still looks like a pencil in the hand.
   const r = Math.max(rx, ry);
-  const s = Math.min(4, Math.max(1, r));
-  // Rubber: its rubbing end is as wide as the eraser.
-  const h = Math.max(5, r);
-  const k = Math.min(3, Math.max(1, r / 5));
+  const art = pencilArt(r);
+  const rub = rubberArt(r);
 
   return (
     <svg
@@ -90,21 +139,18 @@ export default function BrushCursor({
         <g transform="rotate(-45)" stroke={shadow} strokeWidth={0.75} strokeLinejoin="round">
           {erasing ? (
             <>
-              <rect x={0} y={-h} width={12 * k} height={2 * h} rx={2 * k} fill={cursorArt.rubber} />
-              <rect x={12 * k} y={-h} width={16 * k} height={2 * h} rx={k} fill={cursorArt.sleeve} />
+              <rect data-rubber x={0} y={rub.y} width={rub.end} height={rub.height} rx={rub.endRound} fill={cursorArt.rubber} />
+              <rect data-sleeve x={rub.end} y={rub.y} width={rub.sleeve} height={rub.height} rx={rub.sleeveRound} fill={cursorArt.sleeve} />
             </>
           ) : (
             <>
-              <g transform={`scale(${s})`} strokeWidth={0.75 / s}>
+              <g data-lead transform={art.lead} strokeWidth={art.leadStroke}>
                 <polygon points="4,-1.3 11,-3.5 11,3.5 4,1.3" fill={cursorArt.wood} />
                 <rect x={11} y={-3.5} width={20} height={7} fill={cursorArt.body} />
                 <rect x={31} y={-3.5} width={3.5} height={7} fill={cursorArt.ferrule} />
                 <rect x={34.5} y={-3.5} width={4.5} height={7} rx={1.5} fill={cursorArt.eraser} />
               </g>
-              <path
-                d={`M ${4 * s} ${-1.3 * s} L 0 ${-r} A ${r} ${r} 0 0 0 0 ${r} L ${4 * s} ${1.3 * s} Z`}
-                fill={color}
-              />
+              <path data-tip d={art.tip} fill={color} />
             </>
           )}
         </g>

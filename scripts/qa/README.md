@@ -17,7 +17,7 @@ The Claude skill that runs it is `.claude/skills/brush-qa/SKILL.md`.
 | `npm run qa:full` | Everything, on every rendering path. Use it before merging a renderer or brush change. |
 | `npm run qa -- --base <ref>` | Compares against another base, e.g. `--base 5599dd0`. |
 | `npm run qa:baselines` | A full run whose head results become the stored baselines. Run it on a clean `main`. |
-| `npm run brush:check` | Brush precision checks only (no browser, ~10 s). |
+| `npm run brush:check` | Brush precision, input-device and dynamics checks only (no browser, ~12 s). |
 
 Other options:
 
@@ -56,7 +56,7 @@ anything.
 | fast | tooling: `scripts/brush-check/`, configs, `public/`, package changes that are dev-only | harness syntax, `brush:check`, lint delta, production build |
 | pixels | app code and UI (`src/**` not below), the QA harness itself | fast + pixel regression on the CPU path, image-path contract |
 | perf, light plan | pointer-path code that draws nothing: `src/app/page.tsx`, `BrushCursor.tsx`, `useLayerEditor.ts`, `history.ts`, `frameOps.ts`, other `src/lib/layers/*` | pixels + timing of `hardLine` and `pencil` at 240 Hz, latency of `hardLine` |
-| perf, full plan | brush engine (`src/lib/raster/`, `src/lib/pencil/`) | pixels on cpu, gpu, fallback + full timing, latency and stage breakdown |
+| perf, full plan | brush engine (`src/lib/raster/`, `src/lib/pencil/`, the input layer `src/lib/input/`) | pixels on cpu, gpu, fallback + full timing, latency and stage breakdown |
 | perf, full plan | compositor (`layers/composite`, `adjust`, `groups`, `flatten`, `layerSpace`, `drawFrame`, `frameTransform`, `geometry/`) | the same on every path |
 | perf, full plan | stage worker / canvas (`src/lib/stage/`, `Canvas.tsx`), app dependencies and build config | the same on every path, plus the `next dev` smoke test |
 
@@ -112,11 +112,29 @@ on `cpu`, the run fails; it doesn't quietly fall back to the page.
    raster, drawing a page `<img>` must equal the worker's `ImageBitmap` draw
    with emulated mip levels (`stage/geometry.ts`). Re-check it after a
    Chromium update.
-4. **Brush precision** (`npm run brush:check`). There are 35 precision
-   measures (coverage against the exact area, light touch, sub-pixel
-   position, pressure curves, 60 vs 500 Hz, path, hard edge, ends and taps,
-   every brush) and 5 cost measures. A FAIL line fails the run. A precision
-   value worse than the base, even within its limit, is a WARN.
+4. **Brush precision** (`npm run brush:check`). There are 75 precision
+   measures and 9 cost measures:
+   - §1–§10, the brush engine: coverage against the exact area, light touch,
+     sub-pixel position, pressure curves, 60 vs 500 Hz, path, hard edge,
+     ends and taps, every brush;
+   - §11, cost per pointer sample: the stroke and model, the input layer
+     and the dynamics (target < 50 µs per sample for the last two);
+   - §12–§15, the adaptive input layer and the brush dynamics
+     (`docs/brush-dynamics.md`), on SIMULATED device classes
+     (`scripts/brush-check/devices.ts`): what each device is identified as,
+     and that a good pen is never judged a weak one; a premium pen's
+     samples and pixels exactly as the previous input path gave them;
+     quantization terraces and pressure noise averaged without lag or
+     overshoot; calibration monotone, exact when not needed, keeping the
+     interior of the range; every preset response exact when absent,
+     monotone, continuous, deterministic and input-rate independent; and a
+     cross-device matrix (7 devices × 8 gestures × 60/120/240/500 Hz × a
+     tiny and a large brush, 448 strokes) with no breaks, rate independence,
+     and no stroke made less faithful by compensation than raw input.
+
+   A FAIL line fails the run. A precision value worse than the base, even
+   within its limit, is a WARN. The simulated devices are assumptions about
+   classes of hardware, not measurements of it.
 5. **Development mode** (`dev-smoke.mjs`). React Strict Mode mounts the stage
    twice, and a canvas can go to a worker only once. Under `next dev`, exactly
    one stage worker must load, a stroke must draw, and nothing may be logged.
@@ -134,7 +152,7 @@ side.
 | Pen-to-screen latency | For each `pointermove`: the frame that carries its drawing to the display compositor (the worker's `DispatchFrame`, or the page's commit and submit), then viz's next `DrawAndSwap`. Median and p90 per traced run, median over 3 runs. The mean is split into "to the display compositor" + "to screen". | `lib/trace.mjs` `penToScreen` |
 | Cost per thread | Busy time while drawing (union of top-level tasks) of the page main thread, stage worker, renderer compositor, raster workers and display compositor. | `threadBusy` |
 | Per-stage breakdown | Page-thread time per stage: input routing, React dispatch, stroke model, rasterization, dirty-region conversion, stage hand-off, upload, compositing, React re-render, page lifecycle, commit, GC. JS stages come from a V8 CPU profile, browser stages from the trace. The largest stage is the **dominant bottleneck**. | `stageBreakdown` |
-| Brush cost | µs per pointer sample (curve + model + incremental preview), brush:check §11. | `brush-check` |
+| Brush cost | µs per pointer sample (curve + model + incremental preview; input layer; dynamics), brush:check §11. | `brush-check` |
 
 Builds are `next build --no-mangling`: the same compile and type check as
 `npm run build`, with function names kept so the profiles read in source
