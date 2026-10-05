@@ -34,8 +34,16 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
   lasso touch a layer, its pencil strokes are baked into `image` (`pencil/bake.ts`).
 - **Brushes** (`lib/raster/brushes/`): one `MaterialStroke`, built on the existing `StrokePath`, drives five
   materials — soft round / soft rectangle, hard line, water, texture — picked in `components/BrushPanel.tsx`.
-  A new brush is a `BrushSpec` in `presets.ts` plus a `BrushModel` in `models/`. Pressure only ever goes
-  through the continuous curves in `curves.ts` (no thresholds); texture and noise are deterministic.
+  A new brush is a `BrushSpec` in `presets.ts`, plus a `BrushModel` in `models/` only if it needs a new material
+  (Marker and the Eraser brush reuse the soft one). A preset's `dynamics` are data — pressure / speed / tilt →
+  size, opacity, flow, hardness, spacing, angle, taper, jitter — evaluated in a fixed order by `dynamics.ts`;
+  a preset without them draws exactly as before. Pressure only ever goes through the continuous curves in
+  `curves.ts` (no thresholds); texture, noise and jitter are deterministic.
+- **Pen input** (`lib/input`): brush and pencil samples go pointer event → `readPointer` (every channel, lean
+  direction in layer space) → `StrokeInput` (timestamps made increasing, device evidence, calibration) → the
+  stroke. What a device can do is judged from evidence only (`capabilities.ts`: pressure lattice, noise, floor,
+  report rate; never by brand), frozen per stroke at pen-down. Device-specific logic lives here and nowhere
+  else. The devices in `brush:check` §12–15 are simulations, not hardware (`docs/brush-dynamics.md`).
 - **Clipping masks & adjustment layers** (`layer.clip`, `layer.adjust`): the compositor builds the stack on
   its own surface only when a frame has them (`compositeStack`), so other frames render exactly as before.
   Adjustment math is `lib/layers/adjust.ts`. Layers added "on every frame" share a `linkId`; the layer
@@ -57,8 +65,9 @@ Flow: **Import & cut → Studio (stabilize, background, touch-up) → Export**.
 - Background is document state (`CanvasBackground`); checkerboard is view-only and never exported.
 - Page layout is a fixed flex frame (Toolbar / sidebars / Canvas / Timeline). Nothing should shift size.
 - **Per-frame cost while drawing is mostly the browser's**, not the brush engine's: never set React state on
-  pointer moves (the brush cursor's element is moved in place), and never leave a still 2D canvas on the page
-  (each frame copies every 2D canvas to the compositor; the onion skin is shown through a `bitmaprenderer`).
+  pointer moves (the brush cursor is moved, and the pencil's tip resized, in place), and never leave a still
+  2D canvas on the page (each frame copies every 2D canvas to the compositor; the onion skin is shown through
+  a `bitmaprenderer`).
 - **The stage is drawn by a worker** (`lib/stage`): `Canvas.tsx` hands its canvas over on mount
   (`StageClient`), then sends frames (`draw`) and stroke previews (`preview`, made on input, not at the next
   frame, so the worker shows them a frame sooner). Images and strokes cross once and go by key after.

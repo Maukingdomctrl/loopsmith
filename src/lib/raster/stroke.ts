@@ -305,8 +305,9 @@ export class StrokePath {
   private readonly canvasPx: number;
   /** σ (ms) of the zero-lag pressure smoothing between neighbouring samples. */
   private readonly pressureSmoothing: number;
-  /** σ (pressure) of the difference a neighbour may have and still be
-   *  averaged; 0 = any (the smoothing weighs by time alone). */
+  /** σ (pressure) of the neighbour differences the wider smoothing applies
+   *  across; 0 = no limit. Only used when `pressureSmoothing` is wider than
+   *  the default, whose own averaging always applies. */
   private readonly pressureRange: number;
 
   /**

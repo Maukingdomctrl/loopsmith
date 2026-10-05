@@ -414,3 +414,12 @@ export function trackerFor(kind: PointerKind): CapabilityTracker {
   if (!t) trackers.set(kind, (t = new CapabilityTracker(kind)));
   return t;
 }
+
+// Development builds only: `loopsmithInput()` in the browser console lists
+// what has been judged about each kind of pointer so far, for checking a real
+// device by hand (docs/brush-dynamics.md, "Validating on real hardware"). It
+// returns copies, so reading changes nothing. Production builds leave it out.
+if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
+  (window as unknown as { loopsmithInput: () => DeviceProfile[] }).loopsmithInput = () =>
+    [...trackers.values()].map((t) => ({ ...t.profile }));
+}
