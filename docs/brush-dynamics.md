@@ -233,21 +233,27 @@ Measured, not assumed:
 
 | Cost | Value | Where |
 |---|---|---|
-| input layer, per sample | 0.09 µs (continuous pen) – 0.35 µs (coarse floored pen) | brush:check §11 |
-| dynamics, per dab | 0.13 µs (no responses) – 0.47 µs (every response on) | brush:check §11 |
-| stroke model + material + preview, per sample | 98 – 1037 µs | brush:check §11 (unchanged) |
+| input layer, per sample | 0.09 – 0.35 µs (continuous or coarse floored pen, across runs) | brush:check §11 |
+| dynamics, per dab | 0.12 – 0.51 µs (no responses … every response on) | brush:check §11 |
+| stroke model + material + preview, per sample | unchanged: −2.6 % … +2.9 % in 9 cases | interleaved A/B with `main`, best of 21 runs |
 
 Target: under 50 µs per sample (0.05 ms). The new layers cost about
 1/1000 of the stroke model and material, so they are not where time goes.
 The measured bottleneck that did involve pressure was elsewhere: the pencil
 cursor's tip followed pen pressure through React state, re-rendering the
-editor on frames where the pressure changed (51–90 ms per stroke in the
-baseline's stage breakdown). The tip is now resized in place
-(`BrushCursor.sizeCursorTip`), as its position already was.
+editor on frames where the pressure changed (75–78 ms per stroke in the
+stage breakdown). The tip is now resized in place
+(`BrushCursor.sizeCursorTip`), as its position already was, in the same 5 %
+steps. Finer steps repaint the cursor on nearly every frame of a slow stroke
+and cost more than they saved: 1 % steps made the pencil 8 % slower at one
+event per frame.
 
-The end-to-end measurements (main-thread time, pen-to-screen latency,
-per-thread cost, stage breakdown, base → head) are in the QA report of the
-change. See the pull request.
+End to end (`npm run qa`, `main` → this change, medians of warm 241-event
+strokes): the pencil's main thread is 10–11 % lighter (412 → 365 ms at one
+event per frame, 225 → 203 ms at 240 Hz), the brushes are unchanged within
+the run-to-run spread (−6 % … +5 %, none near the 12 % limit), and
+pen-to-screen latency is unchanged (Hard Linework median 14.8 → 13.6 ms,
+pencil 19.4 → 19.6 ms). The full tables are in the pull request.
 
 ## QA
 
