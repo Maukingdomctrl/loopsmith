@@ -485,7 +485,7 @@ const commit = useCallback((next: Frame) => {
   /** The pencil / eraser stroke being drawn: its samples grow in place until
    *  pen-up. `tip` is the cursor's radius at full pressure, canvas px. */
   const liveRef = useRef<{ stroke: PencilStroke & { pts: number[] }; t0: number; tip: number } | null>(null);
-  /** The cursor tip's pressure as last drawn, in hundredths. */
+  /** The cursor tip's pressure as last drawn, in 5 % steps (-1: not yet). */
   const tipShownRef = useRef(-1);
   /** The material brush stroke being drawn on the pixel surface. */
   const strokeRef = useRef<MaterialStroke | null>(null);
@@ -734,16 +734,18 @@ const commit = useCallback((next: Frame) => {
     const stage = stageRef.current;
     if (stage && !stage.offThread) stage.preview(previewDraw);
 
-    // The cursor tip follows pressure, once a frame, resized in place: a
-    // React state per frame would re-render the whole editor while drawing.
+    // The cursor tip follows pressure, at most once a frame and in 5 % steps,
+    // resized in place: a React state would re-render the whole editor, and
+    // every resize repaints the cursor, so finer steps cost a repaint on
+    // nearly every frame of a slow stroke.
     const live = liveRef.current;
     if (live && !maskMode && !strokeRef.current && !shapeRef.current) {
       const pts = live.stroke.pts;
       if (pts.length >= 7) {
-        const q = Math.round(pts[pts.length - 5] * 100);
+        const q = Math.round(pts[pts.length - 5] * 20);
         if (q !== tipShownRef.current) {
           tipShownRef.current = q;
-          sizeCursorTip(brushCursorRef.current, live.tip * widthFactor(q / 100));
+          sizeCursorTip(brushCursorRef.current, live.tip * widthFactor(q / 20));
         }
       }
     }
