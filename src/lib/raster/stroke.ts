@@ -195,6 +195,17 @@ function hermite(f: number, p0: number, p1: number, t0: number, t1: number): num
   );
 }
 
+/**
+ * The signed turn from angle a to angle b, the short way round. Directions
+ * (a pen's lean, its barrel rotation) wrap at ±π: interpolated as plain
+ * numbers, a pen leaning just past west on one sample and just short of it on
+ * the next would swing through east in between.
+ */
+function turn(a: number, b: number): number {
+  const d = b - a;
+  return d > Math.PI ? d - 2 * Math.PI : d < -Math.PI ? d + 2 * Math.PI : d;
+}
+
 /** Short-span polyline length, for Newton's residual. */
 function approximateLength(s: CubicSegment, tA: number, tB: number): number {
   if (tB <= tA) return 0;
@@ -292,16 +303,30 @@ export class StrokePath {
   private readonly alpha: number;
   /** One canvas pixel, in the path's (layer) units. */
   private readonly canvasPx: number;
+  /** σ (ms) of the zero-lag pressure smoothing between neighbouring samples. */
+  private readonly pressureSmoothing: number;
+  /** σ (pressure) of the difference a neighbour may have and still be
+   *  averaged; 0 = any (the smoothing weighs by time alone). */
+  private readonly pressureRange: number;
 
   /**
    * @param canvasPx  Size of one canvas pixel in path units (1 / layer scale).
    *                  Input smoothing works in canvas pixels, so it behaves the
    *                  same at every zoom.
+   * @param pressureSmoothing  σ, ms, of the pressure smoothing, and
+   * @param pressureRange      σ of the pressure difference it averages across:
+   *                  the input layer sets both for a device whose pressure is
+   *                  measurably uncertain (lib/input/pipeline.ts).
    */
-  constructor(smoothing: number, curveAlpha = CURVE_ALPHA_CENTRIPETAL, canvasPx = 1) {
+  constructor(
+    smoothing: number, curveAlpha = CURVE_ALPHA_CENTRIPETAL, canvasPx = 1,
+    pressureSmoothing = PRESSURE_SMOOTHING_MS, pressureRange = 0
+  ) {
     this.smoothing = clamp(smoothing, 0, 1) * MAX_INPUT_SMOOTHING;
     this.alpha = clamp(curveAlpha, 0, 1);
     this.canvasPx = canvasPx > 0 ? canvasPx : 1;
+    this.pressureSmoothing = pressureSmoothing > 0 ? pressureSmoothing : PRESSURE_SMOOTHING_MS;
+    this.pressureRange = pressureRange > 0 ? pressureRange : 0;
   }
 
   get length(): number { return this.totalLength; }
@@ -459,14 +484,36 @@ export class StrokePath {
    * Pressure at knot i, smoothed with its neighbours by a Gaussian in TIME.
    * Symmetric, so it adds no lag: the knot after i always exists by the time a
    * segment ending at i is built (see `rebuildTail`).
+   *
+   * A device whose pressure is uncertain asks for a wider Gaussian, but only
+   * as far as its neighbours' pressures differ by what that uncertainty
+   * explains (a sigma filter, `pressureRange`): noise and one-level steps are
+   * averaged more, a real change of pressure gets exactly the usual
+   * smoothing. Both neighbours get the range weight of the one that differs
+   * MORE, so the average stays symmetric: on a ramp, where the neighbours'
+   * mean is the knot's own value, it changes nothing.
    */
   private smoothPressure(i: number): number {
     const d = this.dynamics;
-    let sum = d[i].pressure, weight = 1;
+    const p = d[i].pressure;
+    const wider = this.pressureSmoothing !== PRESSURE_SMOOTHING_MS;
+    let range = 1;
+    if (wider && this.pressureRange > 0) {
+      for (const j of [i - 1, i + 1]) {
+        if (j < 0 || j >= d.length) continue;
+        const dp = (d[j].pressure - p) / this.pressureRange;
+        range = Math.min(range, Math.exp(-0.5 * dp * dp));
+      }
+    }
+    let sum = p, weight = 1;
     for (const j of [i - 1, i + 1]) {
       if (j < 0 || j >= d.length) continue;
       const dt = (d[j].time - d[i].time) / PRESSURE_SMOOTHING_MS;
-      const w = Math.exp(-0.5 * dt * dt);
+      let w = Math.exp(-0.5 * dt * dt);
+      if (wider) {
+        const dw = (d[j].time - d[i].time) / this.pressureSmoothing;
+        w += (Math.exp(-0.5 * dw * dw) - w) * range;
+      }
       sum += w * d[j].pressure;
       weight += w;
     }
@@ -631,10 +678,10 @@ export class StrokePath {
       tangent: tan,
       pressure: clamp(hermite(f, a.pressure, b.pressure, seg.pressureT0, seg.pressureT1), 0, 1),
       tilt: a.tilt + (b.tilt - a.tilt) * f,
-      twist: a.twist + (b.twist - a.twist) * f,
+      twist: a.twist + turn(a.twist, b.twist) * f,
       speed: a.speed + (b.speed - a.speed) * f,
       time: a.time + (b.time - a.time) * f,
-      azimuth: a.azimuth + (b.azimuth - a.azimuth) * f,
+      azimuth: a.azimuth + turn(a.azimuth, b.azimuth) * f,
     };
   }
 

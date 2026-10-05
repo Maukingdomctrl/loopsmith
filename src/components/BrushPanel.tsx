@@ -8,7 +8,7 @@
  * curved stroke, and the pressure preview a real 0→1 pressure ramp. So the panel
  * is a truthful sample of each brush in the current colour, not an icon set.
  *
- * Rows show all five brushes at once so they can be compared by eye; the
+ * Rows show every brush at once so they can be compared by eye; the
  * settings of the selected one sit underneath.
  */
 
@@ -268,18 +268,20 @@ export default function BrushPanel({
           format={(v) => `${v}%`}
           onChange={(v) => onChange(spec.id, { intensity: v / 100 })}
         />
-        <label className="flex items-center gap-2 text-xs">
-          <span className="w-[58px] shrink-0 text-ink">Mode</span>
-          <select
-            value={p.mode ?? "normal"}
-            onChange={(e) => onChange(spec.id, { mode: e.target.value as BlendMode })}
-            className="min-w-0 flex-1 rounded-ctrl bg-ctrl px-1 py-1 text-xs text-ink outline-none"
-          >
-            {BRUSH_MODES.map((m) => (
-              <option key={m} value={m}>{BLEND_LABELS[m]}</option>
-            ))}
-          </select>
-        </label>
+        {!spec.erase && (
+          <label className="flex items-center gap-2 text-xs">
+            <span className="w-[58px] shrink-0 text-ink">Mode</span>
+            <select
+              value={p.mode ?? "normal"}
+              onChange={(e) => onChange(spec.id, { mode: e.target.value as BlendMode })}
+              className="min-w-0 flex-1 rounded-ctrl bg-ctrl px-1 py-1 text-xs text-ink outline-none"
+            >
+              {BRUSH_MODES.map((m) => (
+                <option key={m} value={m}>{BLEND_LABELS[m]}</option>
+              ))}
+            </select>
+          </label>
+        )}
         {spec.hasAngle && (
           <Slider
             label="Angle"

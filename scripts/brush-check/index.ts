@@ -14,7 +14,13 @@
  *   path         a fast stroke stays on the drawn curve
  *   hardness     anti-aliasing never reaches beyond the pixel the edge crosses
  *   all brushes  the shared stroke pipeline keeps every material continuous
- *   cost         time per pointer sample
+ *   cost         time per pointer sample: stroke and model, input layer,
+ *                dynamics
+ *   input        §12–15 (dynamics.ts): the adaptive input layer and the brush
+ *                dynamics, on SIMULATED device classes (devices.ts) — device
+ *                identification, premium pens untouched, quantization and
+ *                noise averaged without lag, calibration, every preset
+ *                response, and a cross-device × report-rate matrix
  *
  * Runs the app's own TypeScript under Node (no browser, no build).
  * `--sheet <file.png>` sets where the visual test sheet is written.
@@ -29,20 +35,11 @@ import { HardModel, hardTip } from "@/lib/raster/brushes/models/hard";
 import type { BrushId, BrushInput, ModelContext } from "@/lib/raster/brushes/types";
 import { truthCoverage, type Disc } from "./truth";
 import { writePng } from "./png";
+import { check, failureCount, section } from "./report";
+import { dynamicsChecks, dynamicsCost, inputChecks, matrixChecks, pressureChecks } from "./dynamics";
 
 const BLACK = { r: 0, g: 0, b: 0, a: 1 };
 const LV = 255; // one 8-bit level
-
-/* ---------------- report ---------------- */
-
-let failures = 0;
-function check(label: string, value: number, limit: number, unit = "", lower = false): void {
-  const ok = lower ? value >= limit : value <= limit;
-  if (!ok) failures++;
-  const v = Number.isInteger(value) ? String(value) : value.toFixed(3);
-  console.log(`  ${ok ? "pass" : "FAIL"}  ${label.padEnd(58)} ${(v + unit).padStart(10)}   ${lower ? "≥" : "≤"} ${limit}${unit}`);
-}
-const section = (title: string) => console.log(`\n${title}`);
 
 /* ---------------- drawing ---------------- */
 
@@ -175,6 +172,7 @@ function coverageCurves(): void {
           x, y, pressure: 1, velocity: 0, time: i, tilt: 0, azimuth: 0, rotation: 0,
           tangent: { x: -Math.sin(a), y: Math.cos(a) }, distance: (i * 2 * Math.PI * R) / n,
           ds: 0, dt: 0, size, first: i === 0, remaining: Infinity,
+          opacity: 1, flow: 1, texture: 1, hardness: 0, spacing: 1,
         };
         model.dab(input);
       }
@@ -437,6 +435,7 @@ function cost(): void {
     const times = [run(size, step), run(size, step), run(size, step)].sort((p, q) => p - q);
     check(`size ${size}, ${step} px per sample (median of 3)`, times[1], 2000, " µs");
   }
+  dynamicsCost();
 }
 
 /* ---------------- sheet ---------------- */
@@ -495,7 +494,12 @@ hardEdge();
 endsAndTaps();
 allBrushes();
 cost();
+inputChecks();
+pressureChecks();
+dynamicsChecks();
+matrixChecks();
 sheet(sheetPath);
 
+const failures = failureCount();
 console.log(failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.");
 process.exitCode = failures ? 1 : 0;

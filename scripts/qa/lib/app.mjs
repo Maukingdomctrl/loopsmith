@@ -11,6 +11,8 @@ export const BRUSHES = {
   softRect: "Soft Rectangle",
   water: "Water",
   texture: "Texture",
+  marker: "Marker",
+  eraser: "Eraser",
 };
 
 export async function openApp(page, url) {
@@ -22,6 +24,21 @@ export async function openApp(page, url) {
 export async function startDrawing(page) {
   await page.getByRole("button", { name: "Start drawing" }).click();
   await page.waitForTimeout(300);
+}
+
+/** Whether this build's brush panel offers a brush (a base built before a
+ *  brush existed does not). Leaves the panel closed. */
+export async function hasBrush(page, id) {
+  const radio = page.getByRole("radio", { name: new RegExp(BRUSHES[id]) });
+  for (let i = 0; i < 3 && !(await radio.count()); i++) {
+    await page.getByRole("button", { name: "Brush (B)" }).click();
+    await page.waitForTimeout(250);
+  }
+  const found = (await radio.count()) > 0;
+  const close = page.getByRole("button", { name: "Close brush panel" });
+  if (await close.count()) await close.click();
+  await page.waitForTimeout(150);
+  return found;
 }
 
 /** Pick a brush in the brush panel, then close the panel. */

@@ -413,9 +413,11 @@ async function pixels() {
     }
     return out;
   };
+  // (a capture new on the head has nothing to differ from: it does not call
+  // for the base)
   const late = paths.filter((p) => !wanted.includes(p) && (p === "cpu" || p === "gpu") && usable && (() => {
     const c = storedCmp(p, dirOf("head", p));
-    return !c || c.different.length || c.missing.length || c.extra.length;
+    return !c || c.different.length || c.missing.length;
   })());
   if (late.length) {
     say(`  head differs from the stored hashes on ${late.join(", ")}: capturing the base there too …`);
@@ -463,19 +465,23 @@ async function pixels() {
       }
       const changed = p === "gpu" ? real.map((x) => x.file) : r.different;
       c.base = { identical: r.identical.length, different: changed, jitter: jitter.map((x) => x.file), onlyBase: r.onlyA, onlyHead: r.onlyB, details: p === "gpu" ? real.slice(0, 12) : await detail(B, H, r.different) };
-      const n = changed.length + r.onlyA.length + r.onlyB.length;
-      const total = r.identical.length + r.different.length + r.onlyA.length + r.onlyB.length;
-      if (n) verdict("FAIL", `pixels ${p}`, `${n} of ${total} captures differ from the base: ${describeList(c.base.details)}${r.onlyA.length ? `; missing on the head: ${r.onlyA.slice(0, 5).join(", ")}` : ""}${r.onlyB.length ? `; new on the head: ${r.onlyB.slice(0, 5).join(", ")}` : ""}`);
+      // a capture only the head makes (a new scenario step) has no reference
+      // yet: reported, and recorded with the next baselines
+      const n = changed.length + r.onlyA.length;
+      const total = r.identical.length + r.different.length + r.onlyA.length;
+      if (n) verdict("FAIL", `pixels ${p}`, `${n} of ${total} captures differ from the base: ${describeList(c.base.details)}${r.onlyA.length ? `; missing on the head: ${r.onlyA.slice(0, 5).join(", ")}` : ""}`);
       else verdict("PASS", `pixels ${p}`, `${r.identical.length} captures byte-identical to the base${jitter.length ? `, ${jitter.length} within GPU raster jitter` : ""}`);
+      if (r.onlyB.length) verdict("INFO", `pixels ${p}`, `${r.onlyB.length} new capture(s) the base cannot make (new scenario steps), nothing to compare yet — record the baselines after the merge: ${r.onlyB.slice(0, 6).join(", ")}${r.onlyB.length > 6 ? ", …" : ""}`);
       if (jitter.length) verdict("WARN", `pixels ${p}`, `${jitter.length} capture(s) differ from the base by GPU raster jitter only (≤ ${GPU_JITTER.max} level on ≤ ${GPU_JITTER.share * 100} % of pixels): ${describeList(jitter.slice(0, 6))}`);
     }
     const sc = storedCmp(p, H);
     if (sc) {
       c.stored = { identical: sc.identical.length, different: sc.different, missing: sc.missing, extra: sc.extra };
-      const n = sc.different.length + sc.missing.length + sc.extra.length;
+      const n = sc.different.length + sc.missing.length;
       if (!fs.existsSync(B) && usable) {
         if (n) verdict("FAIL", `pixels ${p}`, `${n} of ${sc.identical.length + n} captures differ from the stored baseline`);
         else verdict("PASS", `pixels ${p}`, `${sc.identical.length} captures byte-identical to the stored baseline (recorded at ${stored.pixels.commit.slice(0, 9)}, the same app as the base)`);
+        if (sc.extra.length) verdict("INFO", `pixels ${p}`, `${sc.extra.length} new capture(s) the stored baseline does not have (new scenario steps), nothing to compare yet — record the baselines after the merge: ${sc.extra.slice(0, 6).join(", ")}${sc.extra.length > 6 ? ", …" : ""}`);
       } else if (fs.existsSync(B)) {
         const bs = storedCmp(p, B);
         const stale = bs && bs.different.length + bs.missing.length + bs.extra.length;
@@ -711,8 +717,8 @@ function report() {
   if (results.pixels) {
     L.push("## Pixels", "", "| Path | Captures | vs base | vs stored baseline | Parity with the worker (cpu) |", "|---|---:|---|---|---|");
     for (const [p, c] of Object.entries(results.pixels.compare)) {
-      const ab = c.base ? (c.base.different.length + c.base.onlyBase.length + c.base.onlyHead.length ? `**${c.base.different.length + c.base.onlyBase.length + c.base.onlyHead.length} differ**` : `${c.base.identical} identical${c.base.jitter?.length ? `, ${c.base.jitter.length} jitter` : ""}`) : "—";
-      const st = c.stored ? (c.stored.different.length + c.stored.missing.length + c.stored.extra.length ? `${c.stored.different.length + c.stored.missing.length + c.stored.extra.length} differ` : `${c.stored.identical} identical`) : "—";
+      const ab = c.base ? `${c.base.different.length + c.base.onlyBase.length ? `**${c.base.different.length + c.base.onlyBase.length} differ**` : `${c.base.identical} identical${c.base.jitter?.length ? `, ${c.base.jitter.length} jitter` : ""}`}${c.base.onlyHead.length ? `, ${c.base.onlyHead.length} new` : ""}` : "—";
+      const st = c.stored ? `${c.stored.different.length + c.stored.missing.length ? `${c.stored.different.length + c.stored.missing.length} differ` : `${c.stored.identical} identical`}${c.stored.extra.length ? `, ${c.stored.extra.length} new` : ""}` : "—";
       const par = c.parity ? (c.parity.different.length ? `**${c.parity.different.length} differ**` : `${c.parity.identical} identical`) : "—";
       L.push(`| ${p} | ${c.captures} | ${ab} | ${st} | ${par} |`);
     }

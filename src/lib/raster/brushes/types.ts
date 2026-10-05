@@ -1,16 +1,18 @@
 /**
  * Types for the material brush system.
  *
- * ONE ENGINE, FIVE MATERIALS. Every brush is driven by the same machinery:
+ * ONE ENGINE, MANY BRUSHES. Every brush is driven by the same machinery:
  *
  *     samples → StrokePath (C¹ curve, arc-length resampling, sub-pixel exact)
+ *             → dynamics    (dynamics.ts: the preset's responses, in order)
  *             → BrushInput  (what the brush "feels" at that point)
  *             → BrushModel  (how a material reacts to it)
  *             → material buffers → composite
  *
  * `BrushInput` is the whole contract between the stroke and a material. A model
- * never sees a pointer event, a canvas or a React component: only a point on the
- * curve and what the hand was doing there.
+ * never sees a pointer event, a device, a canvas or a React component: only a
+ * point on the curve, what the hand was doing there, and what the preset's
+ * dynamics made of it.
  */
 
 import type { Vec2, Rect } from "@/types/geometry";
@@ -18,8 +20,10 @@ import type { RGBA } from "@/types/raster";
 import type { BlendMode } from "@/types/layer";
 import type { RasterSurface } from "../surface";
 import type { DirtyTracker } from "../surface";
+import type { PressureCurve } from "./curves";
 
-export type BrushId = "softRound" | "softRect" | "hardLine" | "water" | "texture";
+export type BrushId =
+  | "softRound" | "softRect" | "hardLine" | "water" | "texture" | "marker" | "eraser";
 
 /** Footprint family. Both are analytic distance fields — never bitmaps. */
 export type FootprintShape = "round" | "rect";
@@ -61,13 +65,31 @@ export interface BrushInput {
    *  these, so density does not depend on how densely the dabs are placed. */
   readonly ds: number;
   readonly dt: number;
-  /** User brush radius, layer px. */
+  /** Brush radius at this dab, layer px: the user's size with the preset's
+   *  size dynamics (speed, tilt, taper, jitter) applied. */
   readonly size: number;
   /** True for the first dab of the stroke. */
   readonly first: boolean;
   /** Arc length left before the stroke ends. Infinity while the stroke is
    *  still live; only known once the pen has lifted. */
   readonly remaining: number;
+
+  /*
+   * What the preset's dynamics resolved for this dab (dynamics.ts), as factors
+   * on the material's own response. 1 (hardness 0) leaves the material exactly
+   * as it is; a model applies each one only where its physics has a place for
+   * it (see each model's header).
+   */
+  /** × how much ink or pigment the dab carries. */
+  readonly opacity: number;
+  /** × how fast material is deposited per unit of travel. */
+  readonly flow: number;
+  /** × grain and streak strength. */
+  readonly texture: number;
+  /** 0 = the material's own edge … 1 = as firm as it can be. */
+  readonly hardness: number;
+  /** × the material's dab spacing. */
+  readonly spacing: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,6 +170,68 @@ export interface BrushMaterial {
   /** Overrides the brush's mouse recipe: a technical pen wants none of the
    *  speed and taper behaviour an ink brush is made of. */
   readonly mouse?: MouseDynamics;
+  /** Overrides the brush's dynamics. */
+  readonly dynamics?: BrushDynamics;
+}
+
+/**
+ * A response to a signal: a factor that follows a continuous, monotone curve
+ * (curves.ts) as the signal goes from 0 to `ref`, and stays at its end beyond.
+ */
+export interface Response extends PressureCurve {
+  /** Signal value at which the curve reaches `to`. Speed: canvas px per ms.
+   *  Pressure and tilt: 1 (the default). */
+  readonly ref?: number;
+}
+
+/**
+ * How a brush responds to the hand, as data. Every part is optional and every
+ * missing part leaves the material's own behaviour exactly as it is; the
+ * evaluation order is fixed (dynamics.ts) so the same input always resolves to
+ * the same dab.
+ *
+ * Pressure → size, ink and deposit is each MATERIAL's physics (models/): a
+ * pen's swelling line, an airbrush's deposit, a wash's water. The preset
+ * shapes the pressure that reaches it (`pressure`) and adds what the hand does
+ * besides pressing: speed, tilt, rotation, tapers and variation.
+ */
+export interface BrushDynamics {
+  /** The brush's pressure curve: device pressure → the pressure the material
+   *  feels. Monotone and continuous by construction. Pen and stylus only: a
+   *  device without pressure gets the brush's `mouse` stand-in instead. */
+  readonly pressure?: PressureCurve;
+  /** Factors on the radius, by speed and by tilt. */
+  readonly size?: { readonly speed?: Response; readonly tilt?: Response };
+  /** Factors on the ink a dab carries, by speed and by tilt. */
+  readonly opacity?: { readonly speed?: Response; readonly tilt?: Response };
+  /** Factors on the deposit rate, by speed and by tilt. */
+  readonly flow?: { readonly speed?: Response; readonly tilt?: Response };
+  /** Factors on grain / streak strength, by pressure and by tilt. */
+  readonly texture?: { readonly pressure?: Response; readonly tilt?: Response };
+  /** Edge firmness 0..1, by pressure. */
+  readonly hardness?: Response;
+  /** Factor on the material's dab spacing, and its response to speed. */
+  readonly spacing?: { readonly scale?: number; readonly speed?: Response };
+  /** What the footprint's orientation follows besides the user angle and the
+   *  pen's barrel rotation: the stroke direction, or the pen's lean. */
+  readonly rotation?: { readonly follow?: "none" | "direction" | "azimuth" };
+  /** Tapers on every device, over arc length in brush radii: `size` and
+   *  `opacity` are the factors at the very start / end. */
+  readonly taper?: {
+    readonly start?: number;
+    readonly end?: number;
+    readonly size?: number;
+    readonly opacity?: number;
+  };
+  /** Seeded variation along the stroke, a function of arc length: the same
+   *  stroke replays to the same pixels whatever rate the pen reported at.
+   *  size / opacity: relative amplitude; angle: radians; scatter: radii. */
+  readonly jitter?: {
+    readonly size?: number;
+    readonly opacity?: number;
+    readonly angle?: number;
+    readonly scatter?: number;
+  };
 }
 
 export interface BrushSpec {
@@ -173,6 +257,10 @@ export interface BrushSpec {
   /** Input smoothing handed to StrokePath. */
   readonly smoothing: number;
   readonly mouse: MouseDynamics;
+  /** How the brush responds to the hand beyond its material (dynamics.ts). */
+  readonly dynamics?: BrushDynamics;
+  /** The stroke removes what it covers instead of adding colour. */
+  readonly erase?: boolean;
 }
 
 /** The user's settings for one brush. Size is a radius in canvas px, angle in degrees. */
@@ -208,10 +296,23 @@ export interface MaterialStrokeOptions {
   readonly lockAlpha?: boolean;
   /** Blend mode of the stroke over the layer. Missing = normal. */
   readonly blend?: BlendMode;
+  /** Remove instead of adding colour. Missing = the brush's own `erase`. */
+  readonly erase?: boolean;
+  /** σ (ms) of the curve's zero-lag pressure smoothing, and σ of the pressure
+   *  difference it averages across; missing = the defaults. The input layer
+   *  sets both for a device whose pressure is measurably uncertain (lib/input). */
+  readonly pressureSmoothing?: number;
+  readonly pressureRange?: number;
 }
 
 /** The mouse recipe in force: the selected material's, else the brush's. */
 export function resolveMouse(spec: BrushSpec, material?: string): MouseDynamics {
   const m = spec.materials?.find((x) => x.id === (material ?? spec.defaultMaterial));
   return m?.mouse ?? spec.mouse;
+}
+
+/** The dynamics in force: the selected material's, else the brush's. */
+export function resolveDynamics(spec: BrushSpec, material?: string): BrushDynamics | undefined {
+  const m = spec.materials?.find((x) => x.id === (material ?? spec.defaultMaterial));
+  return m?.dynamics ?? spec.dynamics;
 }

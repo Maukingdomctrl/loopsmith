@@ -1,5 +1,6 @@
 /**
- * Soft Round and Soft Rectangle — the density-accumulating brushes.
+ * Soft Round and Soft Rectangle — the density-accumulating brushes (and the
+ * Marker and the Eraser, which are presets of this same model).
  *
  * One model, two footprints. It behaves like a soft physical brush or an
  * airbrush resting on a surface:
@@ -71,6 +72,15 @@ const MIN_SPACING = 0.3;
 const TILT_STRETCH = 1.4;
 const TILT_SHRINK = 0.2;
 
+/**
+ * Dynamics it honours (dynamics.ts): size (the radius it is given), opacity
+ * and flow (both scale the deposit), spacing, and hardness — which grows the
+ * round kernel's plateau toward this limit and narrows the rectangle's soft
+ * perimeter toward its minimum.
+ */
+const PLATEAU_FIRM = 0.95;
+const RECT_FIRM = 0.9;
+
 interface Dab {
   readonly fp: Footprint;
   readonly gain: number;
@@ -96,7 +106,9 @@ export class SoftModel implements BrushModel {
     if (this.ctx.shape === "rect") {
       const hy = Math.max(0.6, R * pressureCurve(p, CONTACT));
       const hx = hy * this.ctx.aspect;
-      const soft = Math.max(0.3, hy * pressureCurve(p, RECT_SOFT));
+      let edge = hy * pressureCurve(p, RECT_SOFT);
+      if (inp.hardness > 0) edge *= 1 - RECT_FIRM * inp.hardness;
+      const soft = Math.max(0.3, edge);
       return {
         fp: rectFootprint(inp.x, inp.y, hx, hy, inp.rotation, soft),
         gain: 1,
@@ -106,7 +118,8 @@ export class SoftModel implements BrushModel {
 
     const r0 = R * pressureCurve(p, CONTACT);
     const { radius, gain } = pixelSafeRadius(r0);
-    const plateau = pressureCurve(p, PLATEAU);
+    let plateau = pressureCurve(p, PLATEAU);
+    if (inp.hardness > 0) plateau += (PLATEAU_FIRM - plateau) * inp.hardness;
     // a leaning pen presses an ellipse whose long axis lies along the lean
     const rx = radius * (1 + TILT_STRETCH * inp.tilt);
     const ry = radius * (1 - TILT_SHRINK * inp.tilt);
@@ -119,7 +132,7 @@ export class SoftModel implements BrushModel {
 
   spacing(inp: BrushInput): number {
     const { softWidth } = this.shapeFor(inp);
-    return Math.max(MIN_SPACING, SPACING_OF_SOFT * softWidth);
+    return spacingOf(softWidth, inp);
   }
 
   dab(inp: BrushInput): void {
@@ -129,7 +142,7 @@ export class SoftModel implements BrushModel {
     // no travel yet, so it gets half a spacing (the stroke's cap). A tap — a
     // stroke that never moved — deposits what one pass through its centre
     // would (`chord` px of travel), so a click leaves a real mark, not a smudge.
-    const spacing = Math.max(MIN_SPACING, SPACING_OF_SOFT * softWidth);
+    const spacing = spacingOf(softWidth, inp);
     const chord = chordIntegral(fp, inp.tangent.x, inp.tangent.y);
     let ds = inp.ds;
     if (inp.first) ds = inp.remaining === 0 ? chord : spacing * 0.5;
@@ -140,7 +153,7 @@ export class SoftModel implements BrushModel {
     );
     const rate =
       (DENSITY_MAX * this.ctx.intensity * pressureCurve(inp.pressure, DEPOSIT)) / chord;
-    const weight = rate * ds * gain * speed;
+    const weight = rate * ds * gain * speed * inp.flow * inp.opacity;
     if (weight <= 0) return;
 
     this.deposit(fp, weight);
@@ -169,4 +182,9 @@ export class SoftModel implements BrushModel {
   composite(target: RasterSurface, region: Rect): void {
     compositeDensity(target, this.density, region, this.ctx.color);
   }
+}
+
+/** Dab spacing for a soft perimeter of `softWidth` px, with the preset's factor. */
+function spacingOf(softWidth: number, inp: BrushInput): number {
+  return Math.max(MIN_SPACING, SPACING_OF_SOFT * softWidth) * inp.spacing;
 }

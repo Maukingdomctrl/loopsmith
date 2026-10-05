@@ -9,7 +9,9 @@
 // (blend mode, opacity, clipping, layer mask painted by brush and pencil,
 // adjustment layer), frames (second frame, onion skin, window resize),
 // import-big / import-pow2 / import-medium (large images at several zooms:
-// decoded-image resampling and mip levels).
+// decoded-image resampling and mip levels), presets (the Marker and the
+// Eraser brush: preset dynamics on the shared engine; skipped by a build
+// that has neither).
 //
 // Writes one PNG per capture, values.json (the eyedropper's colour) and
 // summary.json (per session: captures, who drew the stage, failures, page
@@ -17,7 +19,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { launch, newPage, options } from "./lib/env.mjs";
-import { captureCanvas, openApp, pickBrush, pngBytes, stageInfo, startDrawing, twoFrames } from "./lib/app.mjs";
+import { captureCanvas, hasBrush, openApp, pickBrush, pngBytes, stageInfo, startDrawing, twoFrames } from "./lib/app.mjs";
 
 const opt = options();
 const URL_ = String(opt("url", "http://localhost:3000/"));
@@ -297,6 +299,24 @@ for (const [w, hh, label] of [[3000, 1700, "big"], [2048, 2048, "pow2"], [1100, 
     await h.penStroke("pencil", 0.45, 0.4, 0.15);
   });
 }
+
+// Preset dynamics on the shared engine: a Marker over a soft wash, then the
+// Eraser brush lifting a band through both. A build without these brushes
+// (a base from before them) skips the session: there is nothing to compare.
+await session("presets", async (h) => {
+  await startDrawing(h.page);
+  await h.settle(400);
+  if (!(await hasBrush(h.page, "marker")) || !(await hasBrush(h.page, "eraser"))) {
+    log("presets: this build has no Marker / Eraser brush — skipped");
+    return;
+  }
+  await h.brush("softRound");
+  await h.penStroke("wash", 0.45, 0.48, 0.22, { capture: false });
+  await h.brush("marker");
+  await h.penStroke("marker", 0.55, 0.5, 0.2);
+  await h.brush("eraser");
+  await h.penStroke("eraser", 0.5, 0.45, 0.16);
+});
 
 fs.writeFileSync(path.join(OUT, "values.json"), JSON.stringify(values, null, 1));
 fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify({ path: RENDER_PATH, sessions: summary, values }, null, 1));

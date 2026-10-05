@@ -1,9 +1,11 @@
 /**
- * The five brushes, as data.
+ * The brushes, as data.
  *
  * Everything the panel shows (name, tagline, sliders, materials) and everything
- * the engine needs to choose a model lives here, so the UI never hard-codes a
- * brush and a sixth brush is one entry.
+ * the engine needs — the model, and how the brush responds to the hand
+ * (`dynamics`, see dynamics.ts) — lives here, so the UI never hard-codes a
+ * brush and a new one is one entry. The Marker and the Eraser are exactly
+ * that: the soft model with their own dynamics, no code of their own.
  *
  * `mouse` is each brush's stand-in for pressure on a device that has none. It
  * is not decoration: it is what lets a mouse user feel the difference between
@@ -144,6 +146,51 @@ export const BRUSHES: readonly BrushSpec[] = [
       { id: "dry", name: "Dry brush" },
     ],
     defaultMaterial: "graphite",
+  },
+  {
+    id: "marker",
+    name: "Marker",
+    tagline: "Flat chisel ink that layers where it overlaps",
+    model: "soft",
+    shape: "rect",
+    defaultSize: 8,
+    minSize: 1,
+    maxSize: 40,
+    defaultIntensity: 0.7,
+    intensityLabel: "Ink",
+    hasAngle: true,
+    aspect: 2.6,
+    smoothing: 0.3,
+    mouse: mouse({ base: 0.95, ramp: 0.4, rampFrom: 0.75 }),
+    dynamics: {
+      // a felt tip lays most of its ink at the lightest touch…
+      pressure: { from: 0.5, to: 1, gamma: 0.7 },
+      // …keeps a firm edge however it is pressed…
+      hardness: { from: 0.85, to: 0.85, gamma: 1 },
+      // …and runs dry on a quick stroke
+      opacity: { speed: { from: 1, to: 0.7, gamma: 1.2, ref: 6 } },
+    },
+  },
+  {
+    id: "eraser",
+    name: "Eraser",
+    tagline: "Lifts paint softly; press to clear",
+    model: "soft",
+    shape: "round",
+    defaultSize: 12,
+    minSize: 1,
+    maxSize: 64,
+    defaultIntensity: 1,
+    intensityLabel: "Strength",
+    smoothing: 0.3,
+    erase: true,
+    mouse: mouse({ base: 0.95, ramp: 0.6, rampFrom: 0.6 }),
+    dynamics: {
+      // a light touch already lifts a little
+      pressure: { from: 0, to: 1, gamma: 0.75 },
+      // firmer-edged than the airbrush, firmer still when pressed
+      hardness: { from: 0.35, to: 0.6, gamma: 1 },
+    },
   },
 ];
 

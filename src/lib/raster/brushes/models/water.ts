@@ -43,6 +43,10 @@
  *
  * One simulation step runs per dab, and dabs are placed by arc length, so the
  * result depends on the path and the hand — never on the frame rate.
+ *
+ * Dynamics it honours (dynamics.ts): size (the radius it is given), flow (water
+ * and pigment) and opacity (pigment). Spacing is part of the simulation (one
+ * step per dab) and texture is the paper's, so neither is taken from a preset.
  */
 
 import type { Rect } from "@/types/geometry";
@@ -216,19 +220,20 @@ export class WaterModel implements BrushModel {
     if (inp.first) ds = inp.remaining === 0 ? chord : spacing * 0.5;
     if (ds <= 0) return;
 
-    // brush loading along the stroke, in radii of travel
-    const travelled = inp.distance / Math.max(1e-6, inp.size);
+    // brush loading along the stroke, in radii of travel (of the user's size:
+    // a taper or jitter does not empty the brush faster)
+    const travelled = inp.distance / Math.max(1e-6, this.ctx.size);
     const load = mix(WATER_TUNING.loadEnd, WATER_TUNING.loadStart, Math.exp(-travelled / WATER_TUNING.loadRun));
     const pool = 1 + (WATER_TUNING.waterStart - 1) * Math.exp(-travelled / WATER_TUNING.waterStartRun);
     const drying = mix(WATER_TUNING.waterEnd, 1, Math.exp(-travelled / WATER_TUNING.waterRun));
     // the brush does not release evenly: a slow, smooth swell of loading
-    const pulse = 1 + 0.9 * (valueNoise1(inp.distance / (5 * inp.size + 6), this.ctx.seed) - 0.5);
+    const pulse = 1 + 0.9 * (valueNoise1(inp.distance / (5 * this.ctx.size + 6), this.ctx.seed) - 0.5);
     const fast = smoothstep(0, 6, inp.velocity); // canvas px per ms: only a flick counts as fast
     const speedWater = mix(1.12, 0.55, fast);
 
     const scale = (ds * gain) / chord;
-    const wAmt = WATER_TUNING.waterMax * pressureCurve(inp.pressure, WATER) * speedWater * pool * drying * pulse * scale;
-    const pAmt = WATER_TUNING.pigmentMax * this.ctx.intensity * pressureCurve(inp.pressure, PIGMENT) * load * pulse * scale;
+    const wAmt = WATER_TUNING.waterMax * pressureCurve(inp.pressure, WATER) * speedWater * pool * drying * pulse * scale * inp.flow;
+    const pAmt = WATER_TUNING.pigmentMax * this.ctx.intensity * pressureCurve(inp.pressure, PIGMENT) * load * pulse * scale * inp.flow * inp.opacity;
 
     const b = footprintBounds(fp, this.w, this.h, 1);
     if (b) {

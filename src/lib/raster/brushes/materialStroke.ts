@@ -1,11 +1,12 @@
 /**
  * MaterialStroke — the universal stroke.
  *
- * All five brushes run through this one class. It owns the curve (the existing
+ * Every brush runs through this one class. It owns the curve (the existing
  * `StrokePath`: smoothing → centripetal Catmull-Rom → arc-length resampling,
  * exact at any sub-pixel position), turns every resampled point into a
- * `BrushInput`, and hands it to a material model. What differs between brushes
- * is only what the model does with that input.
+ * `BrushInput` through the brush's dynamics (dynamics.ts), and hands it to a
+ * material model. What differs between brushes is data — the preset's
+ * dynamics — and what the model does with the input.
  *
  * It presents the same surface as `BrushStroke` / `EraserStroke`
  * (`addSample`, `previewInto`, `end`, `cancel`), so the canvas integration is a
@@ -14,7 +15,8 @@
  * BLEND MODES work like Photoshop's brush Mode: the stroke is built on its own,
  * then blended onto the layer once with the full separable-blend formula (see
  * `compositeInto`). A stroke therefore never multiplies or dodges over itself
- * where it overlaps — only over what was on the layer before it.
+ * where it overlaps — only over what was on the layer before it. An ERASING
+ * brush is built the same way and removes what lies under its coverage.
  *
  * PREVIEW IS INCREMENTAL. The composite of a pixel depends only on the
  * pre-stroke pixel and the material at that pixel, so a live preview only has
@@ -23,20 +25,19 @@
  */
 
 import type { Rect } from "@/types/geometry";
-import type { StrokePoint, StrokeSample } from "@/types/raster";
+import type { StrokeSample } from "@/types/raster";
 import { DirtyTracker, RasterSurface } from "../surface";
 import { hash2 } from "./noise";
 import { compositeInto } from "../color";
 import { StrokePath } from "../stroke";
 import { RECT_EMPTY, rect, rectIsEmpty } from "@/lib/geometry/rect";
-import { clamp01, mix, smootherstep, smoothstep } from "./curves";
+import { clamp01 } from "./curves";
+import { DynamicsEvaluator } from "./dynamics";
 import {
-  resolveMouse,
   type BrushInput,
   type BrushModel,
   type MaterialStrokeOptions,
   type ModelContext,
-  type MouseDynamics,
 } from "./types";
 import { createModel } from "./models";
 
@@ -49,9 +50,9 @@ export class MaterialStroke {
   /** Created with the first sample, so its seed can come from where the stroke
    *  starts (see `addSample`). */
   private model: BrushModel | null = null;
-  private readonly hasPressure: boolean;
   private readonly scale: number;
-  private readonly mouse: MouseDynamics;
+  private readonly dynamics: DynamicsEvaluator;
+  private readonly erase: boolean;
 
   /** Everything this stroke has touched, integer pixels. */
   private readonly extent = new DirtyTracker();
@@ -60,24 +61,17 @@ export class MaterialStroke {
   private scratch: RasterSurface | null = null;
 
   private ended = false;
-  private startTime: number | null = null;
-
-  private prevDistance = -1;
-  private prevTime = 0;
-
-  /** Set while the final flush runs, once the pen has lifted. */
-  private finishing = false;
-  private totalLength = Infinity;
-  private taperLength = 0;
 
   constructor(surface: RasterSurface, options: MaterialStrokeOptions) {
     this.surface = surface;
     this.options = options;
-    this.hasPressure = options.hasPressure;
     this.scale = options.scale && options.scale > 0 ? options.scale : 1;
-    this.mouse = resolveMouse(options.brush, options.material);
+    this.dynamics = new DynamicsEvaluator(options, this.scale);
+    this.erase = options.erase ?? !!options.brush.erase;
 
-    this.path = new StrokePath(options.brush.smoothing, undefined, 1 / this.scale);
+    this.path = new StrokePath(
+      this.dynamics.smoothing, undefined, 1 / this.scale, options.pressureSmoothing, options.pressureRange
+    );
     // Pre-stroke pixels: the previous pigment / material state. Also what a
     // preview is recomposited from, so it is never a running approximation.
     this.baseline = surface.data.slice();
@@ -111,14 +105,16 @@ export class MaterialStroke {
 
   addSample(sample: StrokeSample): void {
     if (this.ended) return;
-    if (this.startTime === null) this.startTime = sample.time;
+    this.dynamics.begin(sample.time);
     // Anything a material varies "at random" (how evenly a wet brush releases
-    // its load, say) is seeded from where the stroke starts: two strokes are
-    // not clones of each other, yet the same input still replays to the same
-    // pixels.
-    this.model ??= this.makeModel(
-      this.options.seed ?? hash2(Math.round(sample.x * 4), Math.round(sample.y * 4), 0x5eed)
-    );
+    // its load, say) — and the preset's jitter — is seeded from where the
+    // stroke starts: two strokes are not clones of each other, yet the same
+    // input still replays to the same pixels.
+    if (!this.model) {
+      const seed = this.options.seed ?? hash2(Math.round(sample.x * 4), Math.round(sample.y * 4), 0x5eed);
+      this.model = this.makeModel(seed);
+      this.dynamics.setSeed(seed);
+    }
 
     // Pressure goes to the curve as reported: StrokePath smooths it between
     // neighbouring samples without lag and interpolates it C¹ along the path.
@@ -143,79 +139,11 @@ export class MaterialStroke {
     // `emitStamps` asks for the next spacing once per emitted point, in order,
     // so the input is built there and reused for the dab.
     this.path.emitStamps((pt) => {
-      const input = this.makeInput(pt);
+      const input = this.dynamics.evaluate(pt);
       inputs.push(input);
       return model.spacing(input);
     }, final);
     for (const input of inputs) model.dab(input);
-  }
-
-  private makeInput(pt: StrokePoint): BrushInput {
-    const o = this.options;
-    const first = this.prevDistance < 0;
-    const time = pt.time - (this.startTime ?? pt.time);
-    const ds = first ? 0 : Math.max(0, pt.distance - this.prevDistance);
-    const dt = first ? 0 : Math.max(0, time - this.prevTime);
-    const velocity = pt.speed * this.scale;
-    // A stroke that never moved is a tap. Its path length is float noise, not
-    // exactly 0, so it is reported as an exact 0 for the models to test.
-    const tap = this.finishing && this.totalLength < 1e-6;
-    const remaining = tap
-      ? 0
-      : this.finishing
-        ? Math.max(0, this.totalLength - pt.distance)
-        : Infinity;
-
-    const pressure = this.hasPressure
-      ? clamp01(pt.pressure)
-      : this.simulatePressure(pt, velocity, remaining, tap);
-
-    this.prevDistance = pt.distance;
-    this.prevTime = time;
-
-    return {
-      x: pt.x,
-      y: pt.y,
-      pressure,
-      velocity,
-      time,
-      tilt: clamp01(pt.tilt / (Math.PI / 2)),
-      azimuth: pt.azimuth,
-      rotation: (o.angle ?? 0) + pt.twist,
-      tangent: pt.tangent,
-      distance: pt.distance,
-      ds,
-      dt,
-      size: o.radius,
-      first,
-      remaining,
-    };
-  }
-
-  /**
-   * A mouse has no pressure, but a brush should still not be a fixed-width
-   * pipe. The stand-in is what a hand does anyway: a stroke begins light and
-   * settles in, lightens when it is flicked quickly, and eases off at the end.
-   * Each brush chooses how much of that it wants (`MouseDynamics`) — a
-   * technical pen wants none of it, an ink brush wants all of it. The result is
-   * a continuous function of arc length and speed, never a step.
-   */
-  private simulatePressure(
-    pt: StrokePoint, velocity: number, remaining: number, tap: boolean
-  ): number {
-    const m = this.mouse;
-    let p = m.base;
-    if (m.speedInfluence > 0) {
-      p *= 1 - m.speedInfluence * smoothstep(0, m.speedRef, velocity);
-    }
-    if (tap) return p;
-    if (m.ramp > 0) {
-      p *= mix(m.rampFrom, 1, smootherstep(0, m.ramp * this.options.radius, pt.distance));
-    }
-    if (m.taper > 0 && this.taperLength > 0 && remaining < this.taperLength) {
-      p *= mix(m.taperTo, 1, smootherstep(0, this.taperLength, remaining));
-    }
-    return clamp01(p);
   }
 
   /* ---------------------------------------------------------------- */
@@ -254,13 +182,14 @@ export class MaterialStroke {
    * Lay the stroke over `target`, which holds the pre-stroke pixels in `r`.
    * Normal mode lets the material composite directly (water glazes over the
    * paint beneath). Any other mode renders the stroke alone first, then blends
-   * that colour and alpha onto the layer, in float, per pixel.
+   * that colour and alpha onto the layer, in float, per pixel; an eraser
+   * removes that alpha's share of every channel (destination-out).
    */
   private compositeRegion(target: RasterSurface, r: Rect): void {
     const model = this.model;
     if (!model) return;
     const mode = this.options.blend ?? "normal";
-    if (mode === "normal") {
+    if (mode === "normal" && !this.erase) {
       model.composite(target, r);
       return;
     }
@@ -273,6 +202,21 @@ export class MaterialStroke {
       s.fill(0, a, a + r.w * 4);
     }
     model.composite(scratch, r);
+    if (this.erase) {
+      for (let y = r.y; y < r.y + r.h; y++) {
+        let i = y * w + r.x * 4;
+        for (let x = 0; x < r.w; x++, i += 4) {
+          const sa = s[i + 3];
+          if (sa <= 0) continue;
+          const keep = sa >= 1 ? 0 : 1 - sa;
+          out[i] *= keep;
+          out[i + 1] *= keep;
+          out[i + 2] *= keep;
+          out[i + 3] *= keep;
+        }
+      }
+      return;
+    }
     for (let y = r.y; y < r.y + r.h; y++) {
       let i = y * w + r.x * 4;
       for (let x = 0; x < r.w; x++, i += 4) {
@@ -317,12 +261,7 @@ export class MaterialStroke {
     // into (dabs already laid down cannot be revised), so its length is only
     // known now.
     this.path.finish();
-    this.totalLength = this.path.length;
-    this.taperLength = Math.min(
-      this.mouse.taper * this.options.radius,
-      Math.max(0, this.totalLength - Math.max(0, this.prevDistance))
-    );
-    this.finishing = true;
+    this.dynamics.finish(this.path.length);
     this.flush(true);
     this.model?.settle();
     this.ended = true;

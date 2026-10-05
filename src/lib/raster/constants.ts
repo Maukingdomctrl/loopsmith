@@ -114,19 +114,12 @@ export const KNOT_EPSILON = 1e-9;
 /* ---------- pressure ---------- */
 
 /**
- * Mice and trackpads report pressure 0.5 while down and 0 on release, and some
- * pens report 0 for the first sample. Treating those as real pressure makes
- * every mouse stroke half-width, so they are mapped to full pressure.
+ * A pen reading at or below this is no pressure at all: some pens report a
+ * sliver of pressure on their first sample. Whether a device's pressure is
+ * real in the first place (mice and trackpads report 0.5 while down) is the
+ * input layer's call, from evidence (lib/input).
  */
-export const MOUSE_PRESSURE_SENTINEL = 0.5;
 export const PRESSURE_EPSILON = 1e-4;
-
-export function normalizePressure(raw: number, isPen: boolean): number {
-  if (!Number.isFinite(raw)) return 1;
-  if (!isPen) return 1;
-  if (raw <= PRESSURE_EPSILON) return 0;
-  return Math.min(1, raw);
-}
 
 /* ---------- flood fill ---------- */
 

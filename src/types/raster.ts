@@ -23,8 +23,9 @@ import type { Rect, Vec2 } from "@/types/geometry";
 /**
  * One raw pointer sample, already converted to local space.
  *
- * `pressure` is 0..1 as reported by PointerEvent; mice report 0.5 when down
- * and 0 when up, which is why `normalizePressure` in constants.ts exists.
+ * `pressure` is the stroke's real pressure, 0..1, as the input layer
+ * (lib/input) has read and calibrated it — or 1 for a device without
+ * pressure (mice report 0.5 when down and 0 when up), whose brush simulates it.
  * `time` is kept because velocity-driven dynamics need it, and because a
  * duplicated sample at the same position but a later time is a legitimate
  * "dwell" that some brushes respond to.
@@ -32,7 +33,7 @@ import type { Rect, Vec2 } from "@/types/geometry";
 export interface StrokeSample {
   readonly x: number;
   readonly y: number;
-  /** 0..1. Already normalized — see normalizePressure. */
+  /** 0..1. Already normalized — see lib/input/pipeline.ts `strokeSample`. */
   readonly pressure: number;
   /** Radians from the surface normal, 0 = perpendicular. 0 when unsupported. */
   readonly tilt: number;

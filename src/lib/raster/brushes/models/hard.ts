@@ -1,6 +1,11 @@
 /**
  * Hard Linework — the precision brush.
  *
+ * Dynamics it honours (dynamics.ts): size, through the radius it is given, and
+ * opacity. Flow, spacing and hardness have no place in it — the line is exact
+ * geometry, its spacing only sets how closely the polyline follows the curve —
+ * and its grain is the material's (applied when compositing).
+ *
  * NOT A STAMP. Nothing here places a disc at each point and hopes the discs
  * merge. The stroke is GEOMETRY: a ribbon whose width is a continuous function
  * of pressure, swept along the curve, and rasterized by exact area:
@@ -158,7 +163,7 @@ export class HardModel implements BrushModel {
 
   private vertexFor(inp: BrushInput): Vertex {
     const t = hardTip(this.ctx.material, inp.pressure, inp.size, this.ctx.scale);
-    return { x: inp.x, y: inp.y, r: t.radius, o: t.opacity * this.ctx.intensity };
+    return { x: inp.x, y: inp.y, r: t.radius, o: Math.min(1, t.opacity * this.ctx.intensity * inp.opacity) };
   }
 
   spacing(inp: BrushInput): number {

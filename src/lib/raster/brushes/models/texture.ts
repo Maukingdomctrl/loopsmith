@@ -28,6 +28,10 @@
  *    with it, and stay continuous along an unbroken line. The paper tooth is
  *    canvas space, so it stays put beneath. The two together are why the result
  *    reads as material dragged over a surface rather than a picture under paint.
+ *
+ * Dynamics it honours (dynamics.ts): size (the radius it is given), opacity
+ * and flow (the deposit), spacing, and texture — the strength of the streaks
+ * and of the tooth's say in where material lands (0 = an even deposit).
  */
 
 import type { Rect } from "@/types/geometry";
@@ -152,17 +156,19 @@ export class TextureModel implements BrushModel {
 
   spacing(inp: BrushInput): number {
     const fp = this.footprintFor(inp);
-    return Math.max(MIN_SPACING, SPACING_OF_RADIUS * Math.min(fp.hx, fp.hy));
+    return Math.max(MIN_SPACING, SPACING_OF_RADIUS * Math.min(fp.hx, fp.hy)) * inp.spacing;
   }
 
   dab(inp: BrushInput): void {
     const s = this.surf;
     const fp = this.footprintFor(inp);
+    // a dynamics taper can bring the footprint to nothing
+    if (!(fp.hx > 0 && fp.hy > 0)) return;
     const b = footprintBounds(fp, this.ctx.width, this.ctx.height);
     if (!b) return;
     this.paper.fill(b.x0, b.y0, b.x1, b.y1);
 
-    const spacing = Math.max(MIN_SPACING, SPACING_OF_RADIUS * Math.min(fp.hx, fp.hy));
+    const spacing = Math.max(MIN_SPACING, SPACING_OF_RADIUS * Math.min(fp.hx, fp.hy)) * inp.spacing;
     const chord = chordIntegral(fp, inp.tangent.x, inp.tangent.y);
     // a tap deposits what one pass through its centre would
     let ds = inp.ds;
@@ -172,7 +178,7 @@ export class TextureModel implements BrushModel {
     const fast = smoothstep(0, SPEED_SPAN, inp.velocity);
     const speedGain = mix(SPEED_SLOW_GAIN, SPEED_FAST_GAIN, fast);
     const amount = pressureCurve(inp.pressure, AMOUNT);
-    const weight = (s.density * this.ctx.intensity * amount * speedGain * ds) / chord;
+    const weight = ((s.density * this.ctx.intensity * amount * speedGain * ds) / chord) * inp.flow * inp.opacity;
     if (weight <= 0) return;
 
     const W = this.ctx.width;
@@ -185,10 +191,14 @@ export class TextureModel implements BrushModel {
     const tiltPress = 1 - TILT_LIGHTEN * inp.tilt;
     const lengthen = s.speedSparse * fast;
     const softW = s.soft;
-    const streakAmt = s.streak;
+    let streakAmt = s.streak;
     const across = s.across, along = s.along;
     const burnish = s.burnish;
-    const dust = s.dust;
+    let dust = s.dust;
+    if (inp.texture !== 1) {
+      streakAmt *= inp.texture;
+      dust = Math.min(1, Math.max(0, 1 - (1 - dust) * inp.texture));
+    }
 
     for (let y = b.y0; y < b.y1; y++) {
       const qy = y + 0.5;

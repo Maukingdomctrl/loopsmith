@@ -44,6 +44,8 @@ const STROKE_RADIUS: Record<BrushId, number> = {
   hardLine: 0.07,
   water: 0.26,
   texture: 0.24,
+  marker: 0.15,
+  eraser: 0.27,
 };
 const TIP_RADIUS: Record<BrushId, number> = {
   softRound: 0.36,
@@ -51,7 +53,12 @@ const TIP_RADIUS: Record<BrushId, number> = {
   hardLine: 0.3,
   water: 0.36,
   texture: 0.34,
+  marker: 0.17,
+  eraser: 0.36,
 };
+
+/** An eraser is shown lifting a band of the colour: the band's opacity. */
+const ERASE_BAND = 0.85;
 
 /** Straight RGBA bytes: the brush composited onto `background`. */
 export function renderBrushPreview(req: PreviewRequest): Uint8ClampedArray<ArrayBuffer> {
@@ -63,6 +70,10 @@ export function renderBrushPreview(req: PreviewRequest): Uint8ClampedArray<Array
   const angle = ((req.angle ?? 0) * Math.PI) / 180;
 
   const radiusFrac = req.kind === "tip" ? TIP_RADIUS[spec.id] : STROKE_RADIUS[spec.id];
+  if (spec.erase) {
+    const a = ERASE_BAND * req.color.a;
+    surface.fill({ r: req.color.r, g: req.color.g, b: req.color.b, a });
+  }
   const stroke = new MaterialStroke(surface, {
     brush: spec,
     color: req.color,
